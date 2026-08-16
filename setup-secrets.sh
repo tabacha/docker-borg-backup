@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# Befüllt secrets/ (SSH-Keypaar, known_hosts, Passphrase) für die
+# Ersteinrichtung. Idempotent: was schon da ist, wird nicht angefasst,
+# beliebig oft erneut laufen lassen also unproblematisch.
+#
+# Läuft sowohl direkt auf dem Host als auch im borg-admin-Container - braucht
+# nur ssh-keygen/ssh-keyscan (aus openssh-client) und python3, beides ist im
+# Image schon drin:
+#
+#   docker run --rm -v "$(pwd):/work" -w /work --entrypoint bash \
+#       ghcr.io/tabacha/docker-borg-backup:latest ./setup-secrets.sh
+
+set -euo pipefail
+
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SECRETS_DIR="${BASE_DIR}/secrets"
+
+if [ ! -f "${BASE_DIR}/.env" ]; then
+    echo "ERROR: ${BASE_DIR}/.env fehlt."
+    echo "Erst 'cp .env.example .env' und ausfüllen (siehe README.md)."
+    exit 1
+fi
+
+set -a
+source "${BASE_DIR}/.env"
+set +a
+
+mkdir -p "${SECRETS_DIR}"
+
+if [ -f "${SECRETS_DIR}/backup_ed25519" ]; then
+    echo "secrets/backup_ed25519 existiert schon, überspringe."
+else
+    echo "Erzeuge secrets/backup_ed25519 ..."
+    ssh-keygen -t ed25519 -f "${SECRETS_DIR}/backup_ed25519" -C "borg-backup" -N ""
+    chmod 600 "${SECRETS_DIR}/backup_ed25519"
+    chmod 644 "${SECRETS_DIR}/backup_ed25519.pub"
+    echo
+    echo "Neuer Public Key - beim Repo-Provider hinterlegen:"
+    cat "${SECRETS_DIR}/backup_ed25519.pub"
+    echo
+fi
+
+if [ -s "${SECRETS_DIR}/known_hosts" ]; then
+    echo "secrets/known_hosts existiert schon, überspringe."
+else
+    echo "Erzeuge secrets/known_hosts (ssh-keyscan ${BORG_SSH_HOST}:${BORG_SSH_PORT}) ..."
+    ssh-keyscan -p "${BORG_SSH_PORT}" "${BORG_SSH_HOST}" > "${SECRETS_DIR}/known_hosts"
+fi
+
+if [ -s "${SECRETS_DIR}/passphrase" ]; then
+    echo "secrets/passphrase existiert schon, überspringe."
+else
+    echo "Erzeuge secrets/passphrase (zufällig, 48 Bytes) ..."
+    python3 -c "import secrets; print(secrets.token_urlsafe(48))" > "${SECRETS_DIR}/passphrase"
+    chmod 600 "${SECRETS_DIR}/passphrase"
+fi
+
+echo
+echo "secrets/ ist bereit:"
+ls -la "${SECRETS_DIR}"
