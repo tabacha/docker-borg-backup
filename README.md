@@ -14,6 +14,7 @@ Repo.
 | `.github/workflows/`  | CI-Sanity-Build + Release-Pipeline (Image-Push nach GHCR), siehe unten. |
 | `.env` / `.env.example` | Konfiguration (Repo-Zugang, Archiv-Präfix, Uptime-Kuma-Tokens). `.env` ist pro Host eigen und wird nicht geteilt. |
 | `secrets/`            | SSH-Key, `known_hosts`, Repo-Passphrase. Pro Host eigen, siehe unten. |
+| `setup-secrets.sh`    | Befüllt `secrets/` (idempotent). Läuft auf dem Host oder im Container. |
 | `backup.sh`           | Unbeaufsichtigter Backup-Lauf, für Cron gedacht.                    |
 | `admin-compact.sh`    | Retention (`prune`) + `compact`, interaktiv per SSH-Login.          |
 | `admin-shell.sh`      | Interaktive Shell im Container für Restore, `borg mount`, Ad-hoc-Kommandos. |
@@ -58,14 +59,25 @@ Repo.
    - `known_hosts` — SSH-Hostkey des Repo-Servers.
    - `passphrase` — Borg-Repo-Passphrase, eine Zeile.
 
+   `setup-secrets.sh` erledigt das (idempotent — was schon da ist, bleibt
+   unangetastet, beliebig oft erneut ausführbar):
+
    ```bash
-   ssh-keygen -t ed25519 -f secrets/backup_ed25519 -C "borg-backup" -N ""
-   ssh-keyscan -p "$BORG_SSH_PORT" "$BORG_SSH_HOST" > secrets/known_hosts
-   echo "eine-lange-zufaellige-passphrase" > secrets/passphrase
-   chmod 600 secrets/backup_ed25519 secrets/passphrase
+   ./setup-secrets.sh
    ```
 
-   Den Public Key (`secrets/backup_ed25519.pub`) beim Repo-Provider hinterlegen.
+   Läuft auch ohne `ssh-keygen`/`ssh-keyscan` auf dem Host und sogar ganz
+   ohne Repo-Klon, nur mit einer `.env` im aktuellen Verzeichnis — das
+   Skript liegt im Image fest unter `/usr/local/bin/setup-secrets.sh`:
+
+   ```bash
+   docker run --rm -v "$(pwd):/work" -e BASE_DIR=/work \
+       --entrypoint /usr/local/bin/setup-secrets.sh \
+       ghcr.io/tabacha/docker-borg-backup:latest
+   ```
+
+   Den ausgegebenen Public Key (`secrets/backup_ed25519.pub`) beim
+   Repo-Provider hinterlegen.
 
 4. **Externe Docker-Volumes anlegen** (Cache/Config bleiben so über
    Image-Updates hinweg erhalten):
@@ -220,7 +232,10 @@ Admin-Key zu benutzen. Was noch fehlt, ist die serverseitige Einschränkung
 des Backup-Keys auf Append-Only:
 
 - **Generischer SSH-Server:** Forced Command in `authorized_keys` auf dem
-  Repo-Server, vor dem Public Key des Backup-Keys:
+  Repo-Server, vor dem Public Key des Backup-Keys. Das aufgerufene Binary
+  muss zu `BORG_REMOTE_PATH` aus `.env` passen (dort meist einfach `borg`,
+  bei Hetzner z.B. `borg-1.4` — `setup-secrets.sh` gibt die fertige Zeile
+  passend zu deiner `.env` mit aus):
   ```
   command="borg serve --append-only --restrict-to-repository /pfad/zum/repo",restrict ssh-ed25519 AAAA... borg-backup
   ```
