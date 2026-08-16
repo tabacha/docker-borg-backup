@@ -51,4 +51,4 @@ jobs:
         with:
           generate_release_notes: true
           body: |
-            Image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
+            Image: `ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}`
