@@ -1,5 +1,10 @@
 # docker-borg-backup
 
+> Dieses Projekt wurde mit KI-Unterstützung (Claude Code) erstellt. Ich habe
+> alles grob gereviewt, aber nicht jede Zeile im Detail geprüft — bei
+> sicherheitsrelevanten Teilen (siehe unten) selbst nochmal genau hinschauen,
+> bevor du das produktiv einsetzt.
+
 Sichert ein Host-Verzeichnis per [Borg](https://borgbackup.org/) über SSH in ein
 Remote-Repo (z.B. eine Hetzner Storage Box). Borg läuft dabei nicht auf dem Host
 selbst, sondern in einem Docker-Container, gebaut aus dem `Dockerfile` in diesem
@@ -11,7 +16,7 @@ Repo.
 |----------------------|--------------------------------------------------------------------|
 | `Dockerfile`          | Baut das Borg-Image, inkl. FUSE-Support.      |
 | `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. Image kommt vorgebaut von GHCR (`docker compose pull`), `build: .` ist Fallback. |
-| `.github/workflows/`  | CI-Sanity-Build + Release-Pipeline (Image-Push nach GHCR), siehe unten. |
+| `DEVELOPMENT.md`      | Für Mitarbeit am Repo selbst: lokale Checks, CI/Release-Pipeline.   |
 | `.env` / `.env.example` | Konfiguration (Repo-Zugang, Archiv-Präfix, Uptime-Kuma-Tokens). `.env` ist pro Host eigen und wird nicht geteilt. |
 | `secrets/`            | SSH-Key, `known_hosts`, Repo-Passphrase. Pro Host eigen, siehe unten. |
 | `backup.sh`           | Unbeaufsichtigter Backup-Lauf, für Cron gedacht.                    |
@@ -267,32 +272,6 @@ Passphrase im Klartext.
 Bei jeder Änderung an `.env`/`secrets/passphrase`/`secrets/known_hosts` neu
 laufen lassen und das alte Blatt ersetzen.
 
-## CI & Releases
-
-Zwei Workflows unter `.github/workflows/`:
-
-- **`docker-build.yml`** — baut das Image bei jedem Push/PR, der das
-  `Dockerfile` ändert (reiner Sanity-Check, pusht nichts).
-- **`release.yml`** — baut und pusht das Image nach
-  [GHCR](https://ghcr.io/tabacha/docker-borg-backup), sobald ein Tag der
-  Form `vX.Y.Z` gepusht wird, und legt dafür automatisch ein GitHub
-  Release an. Ein Release machen:
-
-  ```bash
-  git tag v1.0.0
-  git push origin v1.0.0
-  ```
-
-  Das Image landet dann als `ghcr.io/tabacha/docker-borg-backup:1.0.0`,
-  `:1.0` und `:latest`.
-
-  Damit `docker compose pull` (Schritt 5 oben) ohne Login funktioniert,
-  muss das Package einmalig auf **Public** gestellt werden: auf GitHub zum
-  Repo → rechte Seitenleiste unter "Packages" auf das Package klicken →
-  **Package settings** → ganz unten **Change visibility** → **Public**.
-  Ohne diesen Schritt ist das Image privat und `docker compose pull`
-  bräuchte vorher `docker login ghcr.io`.
-
 ## Sonstiges
 
 - **Cache/Config-Volumes** (`docker-borg-backup_borg-cache`/`_borg-config`)
@@ -301,6 +280,6 @@ Zwei Workflows unter `.github/workflows/`:
 - **FUSE** (`borg mount`) braucht `cap_add: SYS_ADMIN` + `/dev/fuse` im
   Container (schon in `compose.yml` hinterlegt) und ein Host-Kernel mit
   geladenem `fuse`-Modul (`modprobe fuse`, meist schon aktiv).
-- Ohne gesetztes `SSH_AUTH_SOCK` (z.B. bei reinem `docker compose build`) fällt
-  `compose.yml` auf einen Platzhalter-Pfad zurück, damit der Build nicht an
-  einem leeren Volume-Mount scheitert.
+
+Willst du am Repo selbst mitarbeiten (Skripte ändern, CI/Release-Pipeline)?
+Siehe [DEVELOPMENT.md](DEVELOPMENT.md).

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # --severity=warning: SC1091 ("kann .env nicht folgen") ist
+          # erwartet, alle Skripte sourcen .env dynamisch zur Laufzeit.
+          shellcheck --severity=warning -- *.sh .github/scripts/*.sh
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3
+        with:
+          dockerfile: Dockerfile
+
+      - name: actionlint
+        run: |
+          docker run --rm -v "$(pwd):/repo" -w /repo \
+            rhysd/actionlint:1.7.12 -color
+
+      - name: compose.yml - mit .env muss es funktionieren
+        run: |
+          cp .env.example .env
+          SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
+
+      - name: compose.yml - ohne .env muss es sauber abbrechen
+        run: |
+          rm -f .env
+          if SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null 2>&1; then
+            echo "::error::docker compose config sollte ohne .env fehlschlagen, tat es aber nicht"
+            exit 1
+          fi
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t ci-test:local .
+
+      - name: Funktionstest (lokales Repo, FUSE-Mount)
+        run: .github/scripts/functional-test.sh ci-test:local

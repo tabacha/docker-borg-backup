@@ -32,19 +32,25 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build (nur lokal, noch kein Push)
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: true
+          push: false
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Smoke test
-        run: |
-          docker run --rm --entrypoint borg "ghcr.io/${{ github.repository }}:latest" --version
-          docker run --rm --entrypoint python "ghcr.io/${{ github.repository }}:latest" -c "import pyfuse3; print('pyfuse3 OK', pyfuse3.__version__)"
+      - name: Funktionstest (lokales Repo, FUSE-Mount) - erst danach wird gepusht
+        run: .github/scripts/functional-test.sh "ghcr.io/${{ github.repository }}:latest"
+
+      - name: Push (Cache vom Build-Schritt wird wiederverwendet, daher schnell)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
