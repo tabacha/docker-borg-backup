@@ -1,0 +1,26 @@
+name: Docker Build
+
+on:
+  push:
+    paths:
+      - Dockerfile
+      - .github/workflows/docker-build.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - .github/workflows/docker-build.yml
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t local/borg:1.4.5 .
+
+      - name: Smoke test
+        run: |
+          docker run --rm --entrypoint borg local/borg:1.4.5 --version
+          docker run --rm --entrypoint python local/borg:1.4.5 -c "import pyfuse3; print('pyfuse3 OK', pyfuse3.__version__)"

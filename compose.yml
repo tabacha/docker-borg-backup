@@ -1,0 +1,44 @@
+services:
+  borg-admin:
+    build: .
+    image: local/borg:1.4.5
+
+    # Für "borg mount" (FUSE).
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+
+    volumes:
+      - ${BACKUP_SOURCE_DIR}:/source:ro
+      - ./restore:/restore
+      - ./secrets/known_hosts:/root/.ssh/known_hosts:ro
+      - ./secrets/passphrase:/run/secrets/borg-passphrase:ro
+      - ${SSH_AUTH_SOCK:-/tmp/ssh-agent-not-set}:/ssh-agent
+      - borg-cache:/root/.cache/borg
+      - borg-config:/root/.config/borg
+
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+
+      BORG_REPO: "ssh://${BORG_SSH_USER}@${BORG_SSH_HOST}:${BORG_SSH_PORT}/${BORG_REPO_PATH}"
+      BORG_REMOTE_PATH: "${BORG_REMOTE_PATH}"
+      BORG_RSH: >-
+        ssh
+        -p ${BORG_SSH_PORT}
+        -o BatchMode=yes
+        -o ServerAliveInterval=10
+        -o ServerAliveCountMax=30
+
+      BORG_PASSCOMMAND: "cat /run/secrets/borg-passphrase"
+
+volumes:
+  borg-cache:
+    external: true
+    name: docker-borg-backup_borg-cache
+
+  borg-config:
+    external: true
+    name: docker-borg-backup_borg-config
