@@ -230,7 +230,10 @@ Admin-Key zu benutzen. Was noch fehlt, ist die serverseitige Einschränkung
 des Backup-Keys auf Append-Only:
 
 - **Generischer SSH-Server:** Forced Command in `authorized_keys` auf dem
-  Repo-Server, vor dem Public Key des Backup-Keys:
+  Repo-Server, vor dem Public Key des Backup-Keys. Das aufgerufene Binary
+  muss zu `BORG_REMOTE_PATH` aus `.env` passen (dort meist einfach `borg`,
+  bei Hetzner z.B. `borg-1.4` — `setup-secrets.sh` gibt die fertige Zeile
+  passend zu deiner `.env` mit aus):
   ```
   command="borg serve --append-only --restrict-to-repository /pfad/zum/repo",restrict ssh-ed25519 AAAA... borg-backup
   ```

@@ -35,11 +35,23 @@ else
     ssh-keygen -t ed25519 -f "${SECRETS_DIR}/backup_ed25519" -C "borg-backup" -N ""
     chmod 600 "${SECRETS_DIR}/backup_ed25519"
     chmod 644 "${SECRETS_DIR}/backup_ed25519.pub"
-    echo
-    echo "Neuer Public Key - beim Repo-Provider hinterlegen:"
-    cat "${SECRETS_DIR}/backup_ed25519.pub"
-    echo
 fi
+
+echo
+echo "Public Key des Backup-Keys - beim Repo-Provider hinterlegen:"
+cat "${SECRETS_DIR}/backup_ed25519.pub"
+echo
+echo "Der Backup-Key läuft unbeaufsichtigt (siehe README 'Sicherheit: zwei"
+echo "Schlüssel gegen Ransomware') und sollte serverseitig auf Append-Only"
+echo "beschränkt werden - er darf Archive schreiben, aber nichts löschen."
+echo "Bei einem generischen SSH-Server dafür NICHT den Public Key direkt in"
+echo "authorized_keys eintragen, sondern mit vorangestelltem Forced Command:"
+echo
+echo "  command=\"${BORG_REMOTE_PATH} serve --append-only --restrict-to-repository ${BORG_REPO_PATH}\",restrict $(cat "${SECRETS_DIR}/backup_ed25519.pub")"
+echo
+echo "Bei einer Hetzner Storage Box: Public Key ganz normal hinterlegen,"
+echo "Append-Only läuft dort separat über ein eigenes Sub-Konto (siehe"
+echo "README, dort auch der Link auf Hetzners Doku dazu)."
 
 if [ -s "${SECRETS_DIR}/known_hosts" ]; then
     echo "secrets/known_hosts existiert schon, überspringe."
