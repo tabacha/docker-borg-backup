@@ -9,8 +9,9 @@ Repo.
 
 | Pfad                | Zweck                                                              |
 |----------------------|--------------------------------------------------------------------|
-| `Dockerfile`          | Baut das Borg-Image (`local/borg:1.4.5`), inkl. FUSE-Support.      |
-| `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. |
+| `Dockerfile`          | Baut das Borg-Image, inkl. FUSE-Support.      |
+| `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. Image kommt vorgebaut von GHCR (`docker compose pull`), `build: .` ist Fallback. |
+| `.github/workflows/`  | CI-Sanity-Build + Release-Pipeline (Image-Push nach GHCR), siehe unten. |
 | `.env` / `.env.example` | Konfiguration (Repo-Zugang, Archiv-Präfix, Uptime-Kuma-Tokens). `.env` ist pro Host eigen und wird nicht geteilt. |
 | `secrets/`            | SSH-Key, `known_hosts`, Repo-Passphrase. Pro Host eigen, siehe unten. |
 | `backup.sh`           | Unbeaufsichtigter Backup-Lauf, für Cron gedacht.                    |
@@ -74,7 +75,13 @@ Repo.
    docker volume create docker-borg-backup_borg-config
    ```
 
-5. **Image bauen:**
+5. **Image holen** (fertig gebaut von GHCR, spart den lokalen Build):
+
+   ```bash
+   docker compose pull
+   ```
+
+   Alternativ selbst bauen (z.B. für lokale Änderungen am `Dockerfile`):
 
    ```bash
    docker compose build
@@ -259,6 +266,32 @@ Passphrase im Klartext.
 
 Bei jeder Änderung an `.env`/`secrets/passphrase`/`secrets/known_hosts` neu
 laufen lassen und das alte Blatt ersetzen.
+
+## CI & Releases
+
+Zwei Workflows unter `.github/workflows/`:
+
+- **`docker-build.yml`** — baut das Image bei jedem Push/PR, der das
+  `Dockerfile` ändert (reiner Sanity-Check, pusht nichts).
+- **`release.yml`** — baut und pusht das Image nach
+  [GHCR](https://ghcr.io/tabacha/docker-borg-backup), sobald ein Tag der
+  Form `vX.Y.Z` gepusht wird, und legt dafür automatisch ein GitHub
+  Release an. Ein Release machen:
+
+  ```bash
+  git tag v1.0.0
+  git push origin v1.0.0
+  ```
+
+  Das Image landet dann als `ghcr.io/tabacha/docker-borg-backup:1.0.0`,
+  `:1.0` und `:latest`.
+
+  Damit `docker compose pull` (Schritt 5 oben) ohne Login funktioniert,
+  muss das Package einmalig auf **Public** gestellt werden: auf GitHub zum
+  Repo → rechte Seitenleiste unter "Packages" auf das Package klicken →
+  **Package settings** → ganz unten **Change visibility** → **Public**.
+  Ohne diesen Schritt ist das Image privat und `docker compose pull`
+  bräuchte vorher `docker login ghcr.io`.
 
 ## Sonstiges
 

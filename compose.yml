@@ -1,7 +1,10 @@
 services:
   borg-admin:
+    # Vorgebautes Image von GHCR - "docker compose pull" statt selbst
+    # bauen. "build: ." bleibt als Fallback (z.B. für lokale Änderungen
+    # am Dockerfile, oder falls die Registry nicht erreichbar ist).
+    image: ghcr.io/tabacha/docker-borg-backup:latest
     build: .
-    image: local/borg:1.4.5
 
     # Für "borg mount" (FUSE).
     devices:
