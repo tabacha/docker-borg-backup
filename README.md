@@ -17,10 +17,10 @@ Repo.
 | `Dockerfile`          | Baut das Borg-Image, inkl. FUSE-Support.      |
 | `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. Braucht die Umgebungsvariable `TARGET` (welcher Zielserver, siehe unten), die alle Skripte selbst setzen. Image kommt vorgebaut von GHCR (`docker compose pull`), `build: .` ist Fallback. |
 | `DEVELOPMENT.md`      | Für Mitarbeit am Repo selbst: lokale Checks, CI/Release-Pipeline.   |
-| `.env` / `.env.example` | Host-weite Konfiguration (Quellpfade, Pre-Backup-Hook, Uptime-Kuma-Tokens). `.env` ist pro Host eigen und wird nicht geteilt. |
-| `targets/` / `targets/example.env.example` | Pro Zielserver eine `targets/<name>.env` (Repo-Zugang, Archiv-Präfix) — mehrere Dateien für mehrere unabhängige Zielserver. Siehe [Mehrere Zielserver](#mehrere-zielserver). |
+| `targets/` / `targets/example.env.example` | Pro Zielserver eine vollständige `targets/<name>.env` (Repo-Zugang, Quellpfade, Hook, Retention, Uptime-Kuma, …) — mehrere Dateien für mehrere unabhängige Zielserver, kein zusätzliches globales `.env`. Siehe [Mehrere Zielserver](#mehrere-zielserver). |
 | `secrets/`            | Pro Zielserver ein Unterverzeichnis `secrets/<name>/` mit eigenem SSH-Key, `known_hosts`, Repo-Passphrase. Pro Host eigen, siehe unten. |
 | `setup-secrets.sh`    | Befüllt `secrets/<target>/` für EINEN Zielserver (idempotent). Läuft auf dem Host oder im Container. |
+| `migrate-to-v1.1.sh`  | Einmalige Migrationshilfe von v1.0.x (eine globale `.env`) auf v1.1.0+ (benannte Zielserver). Siehe [Migration](#migration-von-v10x-auf-v110). |
 | `backup.sh`           | Unbeaufsichtigter Backup-Lauf für EINEN Zielserver, für Cron gedacht. |
 | `admin-compact.sh`    | Retention (`prune`) + `compact` für EINEN Zielserver, interaktiv per SSH-Login. |
 | `admin-shell.sh`      | Interaktive Shell im Container für EINEN Zielserver — Restore, `borg mount`, Ad-hoc-Kommandos. |
@@ -37,24 +37,9 @@ Repo.
    git clone git@github.com:tabacha/docker-borg-backup.git
    ```
 
-2. **`.env` anlegen:**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Und ausfüllen (gilt host-weit, für alle Zielserver):
-
-   | Variable                | Bedeutung                                                        |
-   |---------------------------|-------------------------------------------------------------------|
-   | `BACKUP_SOURCE_DIRS`      | Host-Verzeichnis(se), die gesichert werden (`-> /source/<n>` im Container). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
-   | `BORG_CREATE_EXTRA_ARGS`  | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`). Optional. |
-   | `PRE_BACKUP_HOOK`         | Befehl, der auf dem Host vor `borg create` läuft (z.B. `mongodump`). Optional, bricht den Lauf bei Fehlschlag ab. |
-   | `PRUNE_RETENTION`         | Default-Retention-Flags für `borg prune` in `admin-compact.sh`, pro Zielserver überschreibbar. Optional — auskommentiert lassen übernimmt den Default im Skript. |
-   | `UPTIME_KUMA_*`           | Default-Push-Monitor für Backup und Compact, pro Zielserver überschreibbar. Optional — leer lassen deaktiviert den Push komplett, es wird dann gar kein Request gemacht. |
-
-3. **Zielserver anlegen.** Für jeden Zielserver, zu dem gesichert werden
-   soll, eine `targets/<name>.env`:
+2. **Zielserver anlegen.** Für jeden Zielserver, zu dem gesichert werden
+   soll, eine vollständige `targets/<name>.env` — das ist die einzige
+   Konfigurationsdatei, kein zusätzliches globales `.env`:
 
    ```bash
    cp targets/example.env.example targets/hetzner1.env
@@ -70,10 +55,18 @@ Repo.
    | `BORG_REPO_PATH`             | Pfad des Repos auf dem Server (z.B. `./borg-backup`).             |
    | `BORG_REMOTE_PATH`           | Name des Borg-Server-Binaries auf dem Remote (Hetzner braucht z.B. `borg-1.4`). |
    | `ARCHIVE_PREFIX`             | Präfix der Archivnamen (`::<prefix>-<zeitstempel>`), auch Filter fürs Prune. |
-   | `PRUNE_RETENTION`            | Überschreibt für DIESEN Zielserver den Wert aus `.env`. Optional. |
-   | `UPTIME_KUMA_*_TOKEN`        | Überschreiben für DIESEN Zielserver die Werte aus `.env`. Optional. |
+   | `BACKUP_SOURCE_DIRS`         | Host-Verzeichnis(se), die zu diesem Zielserver gesichert werden (`-> /source/<n>` im Container). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
+   | `BORG_CREATE_EXTRA_ARGS`     | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`). Optional. |
+   | `PRE_BACKUP_HOOK`            | Befehl, der auf dem Host vor `borg create` läuft (z.B. `mongodump`). Optional, bricht den Lauf bei Fehlschlag ab. |
+   | `PRUNE_RETENTION`            | Retention-Flags für `borg prune` in `admin-compact.sh`. Optional — auskommentiert lassen übernimmt den Default im Skript. |
+   | `UPTIME_KUMA_*`              | Push-Monitor für Backup und Compact DIESES Zielservers. Optional — leer lassen deaktiviert den Push komplett, es wird dann gar kein Request gemacht. |
 
-4. **`secrets/<name>/` befüllen.** Diese Dateien werden NICHT
+   Sichert derselbe Host dieselben Pfade zu mehreren Zielservern, wiederholen
+   sich Werte wie `BACKUP_SOURCE_DIRS` zwangsläufig in mehreren
+   `targets/*.env` — das ist so gewollt: jede Datei ist für sich vollständig
+   und eigenständig kopierbar/verschiebbar.
+
+3. **`secrets/<name>/` befüllen.** Diese Dateien werden NICHT
    geteilt/committet (siehe `.gitignore`), jeder Deployment-Host UND jeder
    Zielserver braucht eigene:
 
@@ -89,7 +82,7 @@ Repo.
 
    `setup-secrets.sh <name>` erledigt das für EINEN Zielserver (idempotent
    — was schon da ist, bleibt unangetastet, beliebig oft erneut ausführbar,
-   braucht die zugehörige `targets/<name>.env` aus Schritt 3):
+   braucht die zugehörige `targets/<name>.env` aus Schritt 2):
 
    ```bash
    ./setup-secrets.sh hetzner1
@@ -106,9 +99,9 @@ Repo.
    ```
 
    Den ausgegebenen Public Key (`secrets/hetzner1/backup_ed25519.pub`) beim
-   Repo-Provider hinterlegen. Für weitere Zielserver Schritt 3+4 wiederholen.
+   Repo-Provider hinterlegen. Für weitere Zielserver Schritt 2+3 wiederholen.
 
-5. **Externe Docker-Volumes anlegen** (Cache/Config bleiben so über
+4. **Externe Docker-Volumes anlegen** (Cache/Config bleiben so über
    Image-Updates hinweg erhalten, gemeinsam für alle Zielserver — siehe
    [Mehrere Zielserver](#mehrere-zielserver)):
 
@@ -117,7 +110,7 @@ Repo.
    docker volume create docker-borg-backup_borg-config
    ```
 
-6. **Image holen** (fertig gebaut von GHCR, spart den lokalen Build):
+5. **Image holen** (fertig gebaut von GHCR, spart den lokalen Build):
 
    ```bash
    docker compose pull
@@ -129,7 +122,7 @@ Repo.
    docker compose build
    ```
 
-7. **Borg-Repo(s) einmalig initialisieren** (nur beim allerersten Mal, für
+6. **Borg-Repo(s) einmalig initialisieren** (nur beim allerersten Mal, für
    ein neues/leeres Repo, pro Zielserver einmal). Das ist eine
    Admin-Operation, braucht also den Admin-Key per Agent-Forwarding — am
    einfachsten direkt in `admin-shell.sh` (siehe unten, `ssh -tA
@@ -154,13 +147,14 @@ Zielserver-Namen entgegen und operieren dann NUR auf dessen Repo — sinnvoll,
 wenn z.B. zu mehreren wechselnd erreichbaren Admin-Rechnern zuhause parallel
 gesichert werden soll (statt zu genau einem fest verdrahteten Server).
 
-Jeder Zielserver hat eine eigene `targets/<name>.env` (Zugangsdaten,
-Archiv-Präfix) und ein eigenes `secrets/<name>/` (eigener Backup-Key, eigene
-`known_hosts`, eigene Repo-Passphrase) — ein kompromittierter Backup-Key für
-Zielserver A gibt also keinen Zugriff auf das Repo von Zielserver B. Cache-
-und Config-Volume (`docker-borg-backup_borg-cache`/`_borg-config`) werden
-dagegen gemeinsam genutzt, das ist unproblematisch: Borg trennt intern nach
-Repo-ID.
+Jeder Zielserver hat eine eigene, vollständige `targets/<name>.env`
+(Zugangsdaten, Quellpfade, Hook, Retention, Uptime-Kuma — kein gemeinsames
+globales `.env`) und ein eigenes `secrets/<name>/` (eigener Backup-Key,
+eigene `known_hosts`, eigene Repo-Passphrase) — ein kompromittierter
+Backup-Key für Zielserver A gibt also keinen Zugriff auf das Repo von
+Zielserver B. Cache- und Config-Volume
+(`docker-borg-backup_borg-cache`/`_borg-config`) werden dagegen gemeinsam
+genutzt, das ist unproblematisch: Borg trennt intern nach Repo-ID.
 
 Für regelmäßige Backups zu mehreren Zielservern einfach mehrere Cron-Zeilen
 eintragen (siehe unten, `backup.sh <name>`) — jeder Lauf ist unabhängig,
@@ -219,9 +213,8 @@ ssh -A user@host /pfad/zum/repo/admin-compact.sh hetzner1
   `backup.sh`, siehe oben).
 - Zeigt Archive vorher/nachher, wendet die Retention an (Default
   `--keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12
-  --keep-yearly 2`, per `PRUNE_RETENTION` in `.env` bzw. pro Zielserver in
-  `targets/<name>.env` überschreibbar, siehe `.env.example`/
-  `targets/example.env.example`), kompaktiert danach.
+  --keep-yearly 2`, per `PRUNE_RETENTION` in `targets/<name>.env`
+  konfigurierbar, siehe `targets/example.env.example`), kompaktiert danach.
 - Ausgabe geht aufs Terminal UND nach
   `logs/admin-compact-<target>-<zeitstempel>.log`.
 - Uptime-Kuma-Push wie beim Backup.
@@ -342,13 +335,13 @@ gesichert wird, darf diese Einschränkung nicht selbst aufheben können.
 ## Notfallwiederherstellung — `disaster-recovery-info.sh`
 
 Wenn dieser Host komplett weg ist (Hardware-Defekt, der Ransomware-Fall von
-oben, …), sind `.env`, `targets/` und `secrets/` genauso weg. Übrig bleibt
+oben, …), sind `targets/` und `secrets/` genauso weg. Übrig bleibt
 bestenfalls ein privater SSH-Key, den jemand getrennt aufbewahrt hat
 (Passwort-Tresor, USB-Stick im Safe, …) — aber ein Key allein bringt nichts
 ohne die Repo-Adresse und die Passphrase.
 
 Ein Blatt gilt für GENAU EINEN Zielserver — bei mehreren Zielservern für
-jeden eins erzeugen. `disaster-recovery-info.sh <target>` liest `.env` +
+jeden eins erzeugen. `disaster-recovery-info.sh <target>` liest
 `targets/<target>.env` + `secrets/<target>/passphrase` +
 `secrets/<target>/known_hosts` und druckt daraus ein einziges, in sich
 geschlossenes Blatt: fertige `BORG_REPO`/`BORG_RSH`/`BORG_PASSPHRASE`-Werte
@@ -364,56 +357,47 @@ Passphrase im Klartext.
 # /tmp/recovery-sheet-hetzner1.txt wieder löschen.
 ```
 
-Bei jeder Änderung an `.env`/`targets/<target>.env`/
-`secrets/<target>/passphrase`/`secrets/<target>/known_hosts` neu laufen
-lassen und das alte Blatt für diesen Zielserver ersetzen.
+Bei jeder Änderung an `targets/<target>.env`/`secrets/<target>/passphrase`/
+`secrets/<target>/known_hosts` neu laufen lassen und das alte Blatt für
+diesen Zielserver ersetzen.
 
 ## Migration von v1.0.x auf v1.1.0
 
 v1.1.0 führt benannte Zielserver ein (siehe oben,
-[Mehrere Zielserver](#mehrere-zielserver)) — das ändert das Layout von
-`.env`/`secrets/` und die Skript-Aufrufe. Bestehende v1.0.x-Deployments
-brauchen dafür einmalig die folgenden Schritte. Am Borg-Repo selbst, an der
-Passphrase und an den vorhandenen Archiven ändert sich dabei NICHTS — es
-geht nur um lokales Config-/Secrets-Layout auf dem Host:
+[Mehrere Zielserver](#mehrere-zielserver)) — die bisherige globale `.env`
+wird durch eine vollständige `targets/<name>.env` ersetzt, `secrets/` zieht
+pro Zielserver in ein Unterverzeichnis um. Am Borg-Repo selbst, an der
+Passphrase und an den vorhandenen Archiven ändert sich dabei NICHTS, es
+geht nur um lokales Config-/Secrets-Layout auf dem Host.
 
-1. **Update holen:**
+**Automatisch mit `migrate-to-v1.1.sh <name>`** (empfohlen — `<name>` frei
+wählbar, z.B. der bisherige `ARCHIVE_PREFIX`-Wert oder einfach `default`):
 
-   ```bash
-   cd /pfad/zum/repo
-   git pull
-   ```
+```bash
+cd /pfad/zum/repo
+git pull
+./migrate-to-v1.1.sh <name>
+```
 
-2. **Zielserver-Namen wählen** (z.B. der bisherige `ARCHIVE_PREFIX`-Wert,
-   oder einfach `default`) und `targets/<name>.env` anlegen:
+Macht aus der bestehenden `.env` (per `BACKUP_SOURCE_DIR` →
+`BACKUP_SOURCE_DIRS` umbenannt) eine `targets/<name>.env` und verschiebt
+`secrets/*` nach `secrets/<name>/`. Lässt die alte `.env` unangetastet
+liegen (nur kopiert, nicht verschoben) — nach Kontrolle der neuen
+`targets/<name>.env` selbst löschen.
 
-   ```bash
-   cp targets/example.env.example targets/<name>.env
-   ```
+**Von Hand**, falls lieber selbst Schritt für Schritt (macht exakt dasselbe):
 
-   Darin die folgenden Werte aus der BISHERIGEN `.env` übertragen (Werte
-   1:1 übernehmen, nichts ändert sich inhaltlich):
-   `BORG_SSH_USER`, `BORG_SSH_HOST`, `BORG_SSH_PORT`, `BORG_REPO_PATH`,
-   `BORG_REMOTE_PATH`, `ARCHIVE_PREFIX`, und falls gesetzt `PRUNE_RETENTION`.
+```bash
+cd /pfad/zum/repo
+git pull
+mkdir -p secrets/<name>
+sed 's/^BACKUP_SOURCE_DIR=/BACKUP_SOURCE_DIRS=/' .env > targets/<name>.env
+mv secrets/backup_ed25519 secrets/backup_ed25519.pub secrets/known_hosts secrets/passphrase secrets/<name>/
+```
 
-3. **Secrets umziehen** (bisher direkt unter `secrets/`, jetzt pro
-   Zielserver in einem Unterverzeichnis):
+In beiden Fällen danach noch zu erledigen:
 
-   ```bash
-   mkdir -p secrets/<name>
-   mv secrets/backup_ed25519 secrets/backup_ed25519.pub secrets/known_hosts secrets/passphrase secrets/<name>/
-   ```
-
-4. **`.env` aufräumen:**
-   - `BACKUP_SOURCE_DIR` umbenennen zu `BACKUP_SOURCE_DIRS` (Wert bleibt
-     gleich, bei Bedarf um weitere Pfade ergänzen, siehe `.env.example`).
-   - `BORG_SSH_*`/`BORG_REPO_PATH`/`BORG_REMOTE_PATH`/`ARCHIVE_PREFIX`/
-     `PRUNE_RETENTION` komplett entfernen (stehen jetzt in
-     `targets/<name>.env`, siehe Schritt 2).
-   - `UPTIME_KUMA_*` bleiben unverändert in `.env` (host-weiter Default),
-     nur bei Bedarf pro Zielserver in `targets/<name>.env` überschreiben.
-
-5. **Cron-/SSH-Aufrufe um den Zielserver-Namen ergänzen:**
+1. **Cron-/SSH-Aufrufe um den Zielserver-Namen ergänzen:**
 
    ```
    0 3 * * * /pfad/zum/repo/backup.sh <name>
@@ -423,12 +407,15 @@ geht nur um lokales Config-/Secrets-Layout auf dem Host:
    ssh -tA user@host /pfad/zum/repo/admin-shell.sh <name>
    ```
 
-6. **Neues Notfall-Blatt erzeugen** (Pfade darin haben sich geändert, altes
+2. **Neues Notfall-Blatt erzeugen** (Pfade darin haben sich geändert, altes
    Blatt danach vernichten):
 
    ```bash
    ./disaster-recovery-info.sh <name> > /tmp/recovery-sheet-<name>.txt
    ```
+
+3. **Alte `.env` löschen**, sobald `targets/<name>.env` kontrolliert ist:
+   `rm .env`.
 
 Alte Lock-Datei (`/run/lock/docker-borg-backup.lock`) und alte Logs
 (`logs/backup-<zeitstempel>.log` ohne Zielserver-Namen im Dateinamen)

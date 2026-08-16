@@ -19,11 +19,11 @@ nicht nur in CI. Das ist auch, was `ci.yml`/`release.yml` selbst benutzen,
 lokal reproduzierbar:
 
 ```bash
-# Shell-Syntax + Lint (SC1091 zum dynamischen .env-Sourcen ist erwartet,
-# alle Skripte sourcen .env dynamisch zur Laufzeit; das dynamische Sourcen
-# von targets/<target>.env braucht dafür einen "# shellcheck source=/dev/null"
-# direkt darüber, siehe backup.sh & Co. - sonst wäre das SC1090, nicht
-# SC1091, und würde die --severity=warning-Filterung nicht überstehen):
+# Shell-Syntax + Lint. Jedes Skript sourced dynamisch genau eine
+# targets/<target>.env - das braucht einen "# shellcheck source=/dev/null"
+# direkt darüber (siehe backup.sh & Co.), sonst SC1090 (non-constant
+# source), das anders als SC1091 nicht per --severity=warning gefiltert
+# wird:
 bash -n *.sh .github/scripts/*.sh
 shellcheck --severity=warning -- *.sh .github/scripts/*.sh
 
@@ -34,11 +34,11 @@ docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
 # Workflow-YAML (inkl. Shellcheck der run:-Blöcke):
 docker run --rm -v "$(pwd):/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
-# compose.yml: einmal mit vorhandener .env + targets/<name>.env, einmal
-# ganz ohne (muss dann sauber abbrechen statt mit leeren Werten
-# durchzulaufen). NICHT gegen die echte .env/targets/ laufen lassen,
-# sondern in einer Kopie testen.
-cp .env.example .env && cp targets/example.env.example targets/example.env
+# compose.yml: einmal mit vorhandener targets/<name>.env, einmal ganz ohne
+# (muss dann sauber abbrechen statt mit leeren Werten durchzulaufen).
+# NICHT gegen die echten targets/*.env laufen lassen, sondern in einer
+# Kopie testen.
+cp targets/example.env.example targets/example.env
 set -a && source targets/example.env && set +a
 TARGET=example SSH_AUTH_SOCK=/tmp/fake docker compose config
 
@@ -59,8 +59,8 @@ Zwei Workflows unter `.github/workflows/`:
   - Job `lint`: `shellcheck` (alle `*.sh`), `hadolint` (`Dockerfile`,
     Konfiguration in `.hadolint.yaml`), `actionlint` (die Workflow-Dateien
     selbst, inkl. Shellcheck der `run:`-Blöcke), `docker compose config`
-    einmal mit und einmal ohne `.env` (muss im zweiten Fall sauber
-    fehlschlagen).
+    einmal mit und einmal ohne `targets/<name>.env` (muss im zweiten Fall
+    sauber fehlschlagen).
   - Job `build-and-test`: baut das Image und lässt
     `.github/scripts/functional-test.sh` drüberlaufen — kompletter
     Borg-Zyklus (`init`/`create`/`list`/`info`/`check`/`extract`/`mount`

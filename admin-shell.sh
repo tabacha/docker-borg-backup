@@ -23,12 +23,11 @@ export TARGET
 
 cd "${BASE_DIR}"
 
-# docker compose lädt automatisch nur ".env" aus dem Projektverzeichnis,
-# nicht targets/<name>.env - deshalb hier beides explizit in die
-# Shell-Umgebung exportieren, damit compose.yml BORG_SSH_USER & Co. für
-# DIESEN Zielserver findet.
+# docker compose lädt Compose-Variablen nicht automatisch aus
+# targets/<name>.env (nur aus einer Datei namens ".env", die es hier nicht
+# gibt) - deshalb hier explizit in die Shell-Umgebung exportieren, damit
+# compose.yml BORG_SSH_USER & Co. für DIESEN Zielserver findet.
 set -a
-source "${BASE_DIR}/.env"
 # shellcheck source=/dev/null
 source "${TARGET_ENV}"
 set +a

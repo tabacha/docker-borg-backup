@@ -23,7 +23,6 @@ export TARGET
 cd "${BASE_DIR}"
 
 set -a
-source "${BASE_DIR}/.env"
 # shellcheck source=/dev/null
 source "${TARGET_ENV}"
 set +a
@@ -31,8 +30,8 @@ set +a
 LOG_DIR="${BASE_DIR}/logs"
 LOCK_FILE="/run/lock/docker-borg-backup-${TARGET}.lock"
 
-# Retention für "borg prune". Optional per PRUNE_RETENTION in .env bzw.
-# targets/<name>.env überschreibbar (z.B. PRUNE_RETENTION="--keep-daily 14
+# Retention für "borg prune". Optional per PRUNE_RETENTION in
+# targets/<name>.env konfigurierbar (z.B. PRUNE_RETENTION="--keep-daily 14
 # --keep-weekly 8 --keep-monthly 24"), sonst dieser Default:
 PRUNE_RETENTION="${PRUNE_RETENTION:---keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2}"
 

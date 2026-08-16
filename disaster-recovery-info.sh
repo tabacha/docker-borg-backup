@@ -31,7 +31,6 @@ if [ ! -f "${TARGET_ENV}" ]; then
 fi
 
 set -a
-source "${BASE_DIR}/.env"
 # shellcheck source=/dev/null
 source "${TARGET_ENV}"
 set +a
@@ -103,12 +102,12 @@ borg extract ::<archiv> pfad/im/backup
 ----------------------------------------------------------------------------
 
 git clone git@github.com:tabacha/docker-borg-backup.git && cd docker-borg-backup
-cp .env.example .env    # BACKUP_SOURCE_DIRS nach Bedarf füllen
 mkdir -p secrets/${TARGET}
 cp targets/example.env.example targets/${TARGET}.env
 # targets/${TARGET}.env mit den obigen Werten füllen (BORG_SSH_USER=...,
 # BORG_SSH_HOST=..., BORG_SSH_PORT=${BORG_SSH_PORT}, BORG_REPO_PATH=...,
-# BORG_REMOTE_PATH=..., ARCHIVE_PREFIX=${ARCHIVE_PREFIX})
+# BORG_REMOTE_PATH=..., ARCHIVE_PREFIX=${ARCHIVE_PREFIX}) sowie
+# BACKUP_SOURCE_DIRS nach Bedarf
 cp /pfad/zum/mitgebrachten/key secrets/${TARGET}/backup_ed25519
 chmod 600 secrets/${TARGET}/backup_ed25519
 echo "${PASSPHRASE}" > secrets/${TARGET}/passphrase

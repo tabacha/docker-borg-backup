@@ -22,7 +22,6 @@ fi
 export TARGET
 
 set -a
-source "${BASE_DIR}/.env"
 # shellcheck source=/dev/null
 source "${TARGET_ENV}"
 set +a
