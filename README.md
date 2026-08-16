@@ -368,6 +368,74 @@ Bei jeder Änderung an `.env`/`targets/<target>.env`/
 `secrets/<target>/passphrase`/`secrets/<target>/known_hosts` neu laufen
 lassen und das alte Blatt für diesen Zielserver ersetzen.
 
+## Migration von v1.0.x auf v1.1.0
+
+v1.1.0 führt benannte Zielserver ein (siehe oben,
+[Mehrere Zielserver](#mehrere-zielserver)) — das ändert das Layout von
+`.env`/`secrets/` und die Skript-Aufrufe. Bestehende v1.0.x-Deployments
+brauchen dafür einmalig die folgenden Schritte. Am Borg-Repo selbst, an der
+Passphrase und an den vorhandenen Archiven ändert sich dabei NICHTS — es
+geht nur um lokales Config-/Secrets-Layout auf dem Host:
+
+1. **Update holen:**
+
+   ```bash
+   cd /pfad/zum/repo
+   git pull
+   ```
+
+2. **Zielserver-Namen wählen** (z.B. der bisherige `ARCHIVE_PREFIX`-Wert,
+   oder einfach `default`) und `targets/<name>.env` anlegen:
+
+   ```bash
+   cp targets/example.env.example targets/<name>.env
+   ```
+
+   Darin die folgenden Werte aus der BISHERIGEN `.env` übertragen (Werte
+   1:1 übernehmen, nichts ändert sich inhaltlich):
+   `BORG_SSH_USER`, `BORG_SSH_HOST`, `BORG_SSH_PORT`, `BORG_REPO_PATH`,
+   `BORG_REMOTE_PATH`, `ARCHIVE_PREFIX`, und falls gesetzt `PRUNE_RETENTION`.
+
+3. **Secrets umziehen** (bisher direkt unter `secrets/`, jetzt pro
+   Zielserver in einem Unterverzeichnis):
+
+   ```bash
+   mkdir -p secrets/<name>
+   mv secrets/backup_ed25519 secrets/backup_ed25519.pub secrets/known_hosts secrets/passphrase secrets/<name>/
+   ```
+
+4. **`.env` aufräumen:**
+   - `BACKUP_SOURCE_DIR` umbenennen zu `BACKUP_SOURCE_DIRS` (Wert bleibt
+     gleich, bei Bedarf um weitere Pfade ergänzen, siehe `.env.example`).
+   - `BORG_SSH_*`/`BORG_REPO_PATH`/`BORG_REMOTE_PATH`/`ARCHIVE_PREFIX`/
+     `PRUNE_RETENTION` komplett entfernen (stehen jetzt in
+     `targets/<name>.env`, siehe Schritt 2).
+   - `UPTIME_KUMA_*` bleiben unverändert in `.env` (host-weiter Default),
+     nur bei Bedarf pro Zielserver in `targets/<name>.env` überschreiben.
+
+5. **Cron-/SSH-Aufrufe um den Zielserver-Namen ergänzen:**
+
+   ```
+   0 3 * * * /pfad/zum/repo/backup.sh <name>
+   ```
+   ```bash
+   ssh -A user@host /pfad/zum/repo/admin-compact.sh <name>
+   ssh -tA user@host /pfad/zum/repo/admin-shell.sh <name>
+   ```
+
+6. **Neues Notfall-Blatt erzeugen** (Pfade darin haben sich geändert, altes
+   Blatt danach vernichten):
+
+   ```bash
+   ./disaster-recovery-info.sh <name> > /tmp/recovery-sheet-<name>.txt
+   ```
+
+Alte Lock-Datei (`/run/lock/docker-borg-backup.lock`) und alte Logs
+(`logs/backup-<zeitstempel>.log` ohne Zielserver-Namen im Dateinamen)
+werden ab jetzt nicht mehr benutzt (neu:
+`docker-borg-backup-<name>.lock`/`logs/backup-<name>-<zeitstempel>.log`) —
+können unbesorgt liegen bleiben oder aufgeräumt werden.
+
 ## Sonstiges
 
 - **Cache/Config-Volumes** (`docker-borg-backup_borg-cache`/`_borg-config`)
