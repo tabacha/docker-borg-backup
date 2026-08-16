@@ -12,6 +12,11 @@ set +a
 LOG_DIR="${BASE_DIR}/logs"
 LOCK_FILE="/run/lock/docker-borg-backup.lock"
 
+# Retention für "borg prune". Optional per PRUNE_RETENTION in .env
+# überschreibbar (z.B. PRUNE_RETENTION="--keep-daily 14 --keep-weekly 8
+# --keep-monthly 24"), sonst dieser Default:
+PRUNE_RETENTION="${PRUNE_RETENTION:---keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2}"
+
 # Uptime-Kuma-Push ist optional: nur aktiv, wenn beide Variablen gesetzt sind.
 PUSH_URL=""
 if [ -n "${UPTIME_KUMA_BASE_URL:-}" ] && [ -n "${UPTIME_KUMA_COMPACT_TOKEN:-}" ]; then
@@ -61,15 +66,12 @@ OUTPUT=$(
 
     echo
     echo "=== Applying retention using ADMIN access ==="
+    # shellcheck disable=SC2086  # PRUNE_RETENTION ist eine absichtliche Flag-Liste
     docker compose run --rm borg-admin prune \
         --list \
         --stats \
         --glob-archives="${ARCHIVE_PREFIX}-*" \
-        --keep-within 2d \
-        --keep-daily 7 \
-        --keep-weekly 3 \
-        --keep-monthly 12 \
-        --keep-yearly 2
+        ${PRUNE_RETENTION}
 
     echo
     echo "=== COMPACT ==="

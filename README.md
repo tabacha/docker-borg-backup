@@ -51,6 +51,7 @@ Repo.
    | `BORG_REPO_PATH`           | Pfad des Repos auf dem Server (z.B. `./borg-backup`).             |
    | `BORG_REMOTE_PATH`         | Name des Borg-Server-Binaries auf dem Remote (Hetzner braucht z.B. `borg-1.4`). |
    | `ARCHIVE_PREFIX`           | Präfix der Archivnamen (`::<prefix>-<zeitstempel>`), auch Filter fürs Prune. |
+   | `PRUNE_RETENTION`          | Retention-Flags für `borg prune` in `admin-compact.sh`. Optional — auskommentiert lassen übernimmt den Default im Skript. |
    | `UPTIME_KUMA_*`             | Push-Monitor für Backup und Compact. Optional — leer lassen deaktiviert den Push komplett, es wird dann gar kein Request gemacht. |
 
 3. **`secrets/` befüllen.** Diese Dateien werden NICHT geteilt/committet
@@ -150,9 +151,10 @@ ssh -A user@host /pfad/zum/repo/admin-compact.sh
 
 - Bricht ab, wenn `SSH_AUTH_SOCK` fehlt (`ssh -A` vergessen) oder gerade ein
   Backup/Compact läuft (gleicher Lock wie `backup.sh`).
-- Zeigt Archive vorher/nachher, wendet die Retention aus `admin-compact.sh` an
-  (`--keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12
-  --keep-yearly 2` — bei Bedarf im Skript anpassen), kompaktiert danach.
+- Zeigt Archive vorher/nachher, wendet die Retention an (Default
+  `--keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12
+  --keep-yearly 2`, per `PRUNE_RETENTION` in `.env` überschreibbar, siehe
+  `.env.example`), kompaktiert danach.
 - Ausgabe geht aufs Terminal UND nach `logs/admin-compact-<zeitstempel>.log`.
 - Uptime-Kuma-Push wie beim Backup.
 
