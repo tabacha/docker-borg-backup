@@ -5,8 +5,8 @@ ARG BORG_VERSION=1.4.5
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       openssh-client \
-      ca-certificates \
       fuse3 \
+      ca-certificates \
       build-essential \
       pkg-config \
       libssl-dev \
@@ -16,6 +16,7 @@ RUN apt-get update \
       libfuse3-dev \
  && pip install --no-cache-dir "borgbackup[pyfuse3]==${BORG_VERSION}" \
  && apt-get purge -y \
+      ca-certificates \
       build-essential \
       pkg-config \
       libssl-dev \
