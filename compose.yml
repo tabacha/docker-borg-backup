@@ -14,11 +14,15 @@ services:
     security_opt:
       - apparmor:unconfined
 
+    # Kein Host-Quellverzeichnis hier: backup.sh mountet die in
+    # BACKUP_SOURCE_DIRS konfigurierten Pfade dynamisch per zusätzlichem
+    # "-v" beim "docker compose run" Aufruf (beliebig viele unabhängige
+    # Verzeichnisbäume, compose.yml selbst kann keine dynamisch lange
+    # Liste von Volumes deklarieren).
     volumes:
-      - ${BACKUP_SOURCE_DIR}:/source:ro
       - ./restore:/restore
-      - ./secrets/known_hosts:/root/.ssh/known_hosts:ro
-      - ./secrets/passphrase:/run/secrets/borg-passphrase:ro
+      - ./secrets/${TARGET:?TARGET ist nicht gesetzt - Skripte immer mit Zielserver-Namen aufrufen, z.B. "backup.sh <target>", siehe README.md}/known_hosts:/root/.ssh/known_hosts:ro
+      - ./secrets/${TARGET}/passphrase:/run/secrets/borg-passphrase:ro
       - ${SSH_AUTH_SOCK:-/tmp/ssh-agent-not-set}:/ssh-agent
       - borg-cache:/root/.cache/borg
       - borg-config:/root/.config/borg
@@ -26,8 +30,8 @@ services:
     environment:
       SSH_AUTH_SOCK: /ssh-agent
 
-      BORG_REPO: "ssh://${BORG_SSH_USER}@${BORG_SSH_HOST}:${BORG_SSH_PORT}/${BORG_REPO_PATH}"
-      BORG_REMOTE_PATH: "${BORG_REMOTE_PATH}"
+      BORG_REPO: "ssh://${BORG_SSH_USER:?BORG_SSH_USER ist nicht gesetzt - siehe targets/<name>.env}@${BORG_SSH_HOST:?BORG_SSH_HOST ist nicht gesetzt - siehe targets/<name>.env}:${BORG_SSH_PORT:?BORG_SSH_PORT ist nicht gesetzt - siehe targets/<name>.env}/${BORG_REPO_PATH:?BORG_REPO_PATH ist nicht gesetzt - siehe targets/<name>.env}"
+      BORG_REMOTE_PATH: "${BORG_REMOTE_PATH:?BORG_REMOTE_PATH ist nicht gesetzt - siehe targets/<name>.env}"
       BORG_RSH: >-
         ssh
         -p ${BORG_SSH_PORT}
@@ -38,6 +42,9 @@ services:
       BORG_PASSCOMMAND: "cat /run/secrets/borg-passphrase"
 
 volumes:
+  # Von allen Zielservern gemeinsam genutzt (nicht pro Zielserver) - Borg
+  # legt darin Cache/Config-Daten je Repo-ID getrennt ab, ein gemeinsames
+  # Volume für mehrere Repos ist ausdrücklich unterstützt.
   borg-cache:
     external: true
     name: docker-borg-backup_borg-cache

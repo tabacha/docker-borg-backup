@@ -1,24 +1,52 @@
 #!/bin/bash
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${BASE_DIR}/logs"
-LOCK_FILE="/run/lock/docker-borg-backup.lock"
 
 set -euo pipefail
 
+TARGET="${1:?Usage: admin-shell.sh <target> (siehe targets/*.env.example, README.md)}"
+
+if [[ ! "${TARGET}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: Zielserver-Name '${TARGET}' ungültig (nur Buchstaben, Ziffern, - und _)." >&2
+    exit 1
+fi
+
+TARGET_ENV="${BASE_DIR}/targets/${TARGET}.env"
+
+if [ ! -f "${TARGET_ENV}" ]; then
+    echo "ERROR: ${TARGET_ENV} fehlt." >&2
+    echo "Erst 'cp targets/example.env.example targets/${TARGET}.env' und ausfüllen (siehe README.md)." >&2
+    exit 1
+fi
+
+export TARGET
+
 cd "${BASE_DIR}"
+
+# docker compose lädt automatisch nur ".env" aus dem Projektverzeichnis,
+# nicht targets/<name>.env - deshalb hier beides explizit in die
+# Shell-Umgebung exportieren, damit compose.yml BORG_SSH_USER & Co. für
+# DIESEN Zielserver findet.
+set -a
+source "${BASE_DIR}/.env"
+# shellcheck source=/dev/null
+source "${TARGET_ENV}"
+set +a
+
+LOCK_FILE="/run/lock/docker-borg-backup-${TARGET}.lock"
 
 mkdir -p "${LOG_DIR}"
 
 # Logs älter als 30 Tage löschen.
 find "${LOG_DIR}" \
     -type f \
-    -name 'admin-shell-*.log' \
+    -name "admin-shell-${TARGET}-*.log" \
     -mtime +30 \
     -delete \
     >/dev/null 2>&1 || true
 
 # Mitschnitt der kompletten Sitzung (Befehle + Ausgaben).
-RUN_LOG="${LOG_DIR}/admin-shell-$(date '+%Y-%m-%d_%H-%M-%S').log"
+RUN_LOG="${LOG_DIR}/admin-shell-${TARGET}-$(date '+%Y-%m-%d_%H-%M-%S').log"
 
 if [ -z "${SSH_AUTH_SOCK:-}" ]; then
     echo "ERROR: SSH_AUTH_SOCK is not set."
@@ -28,7 +56,7 @@ fi
 
 if [ ! -t 0 ]; then
     echo "ERROR: Kein TTY auf stdin."
-    echo "Bitte mit 'ssh -tA ...' bzw. 'ssh -tA root@host ${0}' einloggen,"
+    echo "Bitte mit 'ssh -tA ...' bzw. 'ssh -tA root@host ${0} ${TARGET}' einloggen,"
     echo "sonst kann der Container kein interaktives Terminal bekommen."
     exit 1
 fi
@@ -39,13 +67,13 @@ ssh-add -l
 exec 9>"${LOCK_FILE}"
 
 if ! flock -n 9; then
-    echo "Abbruch: Ein Backup- oder Maintenance-Lauf ist bereits aktiv."
+    echo "Abbruch: Ein Backup- oder Maintenance-Lauf für Zielserver '${TARGET}' ist bereits aktiv."
     exit 1
 fi
 
 cat <<EOF
 ============================================================================
- Interaktive Borg-Shell
+ Interaktive Borg-Shell - Zielserver: ${TARGET}
 ============================================================================
 
 BORG_REPO / BORG_PASSCOMMAND / BORG_RSH sind schon als Umgebungsvariablen
@@ -90,7 +118,7 @@ Die wiederhergestellten Dateien liegen danach unter
 ${BASE_DIR}/restore/ auf dem Host.
 
 Solange diese Shell offen ist, halten wir den Lock: automatisches Backup
-und admin-compact.sh warten, bis du fertig bist.
+und admin-compact.sh für Zielserver '${TARGET}' warten, bis du fertig bist.
 
 Diese Sitzung wird komplett (Befehle + Ausgaben) mitgeschnitten nach:
   ${RUN_LOG}
@@ -103,7 +131,7 @@ EOF
 CMD=(
     docker compose run --rm -it
     --entrypoint /bin/bash
-    -e "PS1=\[\e[1;33m\][borg-admin]\[\e[0m\] \w # "
+    -e "PS1=\[\e[1;33m\][borg-admin:${TARGET}]\[\e[0m\] \w # "
     borg-admin
 )
 

@@ -31,14 +31,18 @@ jobs:
           docker run --rm -v "$(pwd):/repo" -w /repo \
             rhysd/actionlint:1.7.12 -color
 
-      - name: compose.yml - mit .env muss es funktionieren
+      - name: compose.yml - mit .env + targets/*.env muss es funktionieren
         run: |
           cp .env.example .env
-          SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
+          cp targets/example.env.example targets/example.env
+          set -a
+          source targets/example.env
+          set +a
+          TARGET=example SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
 
       - name: compose.yml - ohne .env muss es sauber abbrechen
         run: |
-          rm -f .env
+          rm -f .env targets/example.env
           if SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null 2>&1; then
             echo "::error::docker compose config sollte ohne .env fehlschlagen, tat es aber nicht"
             exit 1

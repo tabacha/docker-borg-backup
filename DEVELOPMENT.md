@@ -20,7 +20,10 @@ lokal reproduzierbar:
 
 ```bash
 # Shell-Syntax + Lint (SC1091 zum dynamischen .env-Sourcen ist erwartet,
-# alle Skripte sourcen .env dynamisch zur Laufzeit):
+# alle Skripte sourcen .env dynamisch zur Laufzeit; das dynamische Sourcen
+# von targets/<target>.env braucht dafür einen "# shellcheck source=/dev/null"
+# direkt darüber, siehe backup.sh & Co. - sonst wäre das SC1090, nicht
+# SC1091, und würde die --severity=warning-Filterung nicht überstehen):
 bash -n *.sh .github/scripts/*.sh
 shellcheck --severity=warning -- *.sh .github/scripts/*.sh
 
@@ -31,10 +34,13 @@ docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
 # Workflow-YAML (inkl. Shellcheck der run:-Blöcke):
 docker run --rm -v "$(pwd):/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
-# compose.yml: einmal mit vorhandener .env, einmal ohne (muss dann sauber
-# abbrechen statt mit leeren Werten durchzulaufen). NICHT gegen die echte
-# .env laufen lassen, sondern in einer Kopie testen.
-SSH_AUTH_SOCK=/tmp/fake docker compose config
+# compose.yml: einmal mit vorhandener .env + targets/<name>.env, einmal
+# ganz ohne (muss dann sauber abbrechen statt mit leeren Werten
+# durchzulaufen). NICHT gegen die echte .env/targets/ laufen lassen,
+# sondern in einer Kopie testen.
+cp .env.example .env && cp targets/example.env.example targets/example.env
+set -a && source targets/example.env && set +a
+TARGET=example SSH_AUTH_SOCK=/tmp/fake docker compose config
 
 # Image + kompletter Borg-Zyklus (init/create/list/info/check/extract/
 # mount+FUSE/prune/delete/compact) gegen ein lokales Repo, kein SSH nötig:

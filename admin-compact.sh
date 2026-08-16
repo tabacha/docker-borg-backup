@@ -3,18 +3,37 @@ BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 set -euo pipefail
 
+TARGET="${1:?Usage: admin-compact.sh <target> (siehe targets/*.env.example, README.md)}"
+
+if [[ ! "${TARGET}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: Zielserver-Name '${TARGET}' ungültig (nur Buchstaben, Ziffern, - und _)." >&2
+    exit 1
+fi
+
+TARGET_ENV="${BASE_DIR}/targets/${TARGET}.env"
+
+if [ ! -f "${TARGET_ENV}" ]; then
+    echo "ERROR: ${TARGET_ENV} fehlt." >&2
+    echo "Erst 'cp targets/example.env.example targets/${TARGET}.env' und ausfüllen (siehe README.md)." >&2
+    exit 1
+fi
+
+export TARGET
+
 cd "${BASE_DIR}"
 
 set -a
 source "${BASE_DIR}/.env"
+# shellcheck source=/dev/null
+source "${TARGET_ENV}"
 set +a
 
 LOG_DIR="${BASE_DIR}/logs"
-LOCK_FILE="/run/lock/docker-borg-backup.lock"
+LOCK_FILE="/run/lock/docker-borg-backup-${TARGET}.lock"
 
-# Retention für "borg prune". Optional per PRUNE_RETENTION in .env
-# überschreibbar (z.B. PRUNE_RETENTION="--keep-daily 14 --keep-weekly 8
-# --keep-monthly 24"), sonst dieser Default:
+# Retention für "borg prune". Optional per PRUNE_RETENTION in .env bzw.
+# targets/<name>.env überschreibbar (z.B. PRUNE_RETENTION="--keep-daily 14
+# --keep-weekly 8 --keep-monthly 24"), sonst dieser Default:
 PRUNE_RETENTION="${PRUNE_RETENTION:---keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2}"
 
 # Uptime-Kuma-Push ist optional: nur aktiv, wenn beide Variablen gesetzt sind.
@@ -28,13 +47,13 @@ mkdir -p "${LOG_DIR}"
 # Logs älter als 30 Tage löschen.
 find "${LOG_DIR}" \
     -type f \
-    -name 'admin-compact-*.log' \
+    -name "admin-compact-${TARGET}-*.log" \
     -mtime +30 \
     -delete \
     >/dev/null 2>&1 || true
 
 # Pro Lauf eine eigene Logdatei, zusätzlich zur Ausgabe auf dem Terminal.
-RUN_LOG="${LOG_DIR}/admin-compact-$(date '+%Y-%m-%d_%H-%M-%S').log"
+RUN_LOG="${LOG_DIR}/admin-compact-${TARGET}-$(date '+%Y-%m-%d_%H-%M-%S').log"
 
 if [ -z "${SSH_AUTH_SOCK:-}" ]; then
     echo "ERROR: SSH_AUTH_SOCK is not set."
@@ -48,11 +67,11 @@ ssh-add -l
 exec 9>"${LOCK_FILE}"
 
 if ! flock -n 9; then
-    echo "Abbruch: Ein Backup- oder Maintenance-Lauf ist bereits aktiv."
+    echo "Abbruch: Ein Backup- oder Maintenance-Lauf für Zielserver '${TARGET}' ist bereits aktiv."
     exit 1
 fi
 
-echo "Started: $(date -Is)" | tee "${RUN_LOG}"
+echo "Started: $(date -Is) (target: ${TARGET})" | tee "${RUN_LOG}"
 
 START=$SECONDS
 
@@ -98,10 +117,10 @@ DURATION=$(( SECONDS - START ))
 
 if [ "${EXIT}" == "0" ]; then
     STATUS=up
-    MSG="OK"
+    MSG="OK (${TARGET})"
 else
     STATUS=down
-    MSG="admin-compact fehlgeschlagen (exit ${EXIT}): $(echo "$OUTPUT" | tail -n 5 | tr '\n' ' ')"
+    MSG="admin-compact fehlgeschlagen (${TARGET}, exit ${EXIT}): $(echo "$OUTPUT" | tail -n 5 | tr '\n' ' ')"
 fi
 
 if [ -n "${PUSH_URL}" ]; then
