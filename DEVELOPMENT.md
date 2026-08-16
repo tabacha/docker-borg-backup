@@ -75,6 +75,28 @@ Zwei Workflows unter `.github/workflows/`:
   Das Image landet dann als `ghcr.io/tabacha/docker-borg-backup:1.0.0`,
   `:1.0` und `:latest`.
 
+  **Pre-Release:** Ein Tag mit Bindestrich-Suffix (Semver-Konvention für den
+  Prerelease-Teil, z.B. `v1.1.0-rc1`) triggert `release.yml` genauso — baut
+  also inkl. komplettem `functional-test.sh`-Zyklus via echter CI und pusht
+  bei Erfolg —, setzt aber NUR den exakten Versions-Tag (`1.1.0-rc1`).
+  Weder `:1.1` noch `:latest` werden dabei (um)gesetzt, ein Tag der Form
+  `vX.Y.Z-irgendwas` überschreibt also nie den Tag, den ein normales
+  `docker compose pull` zieht. Die GitHub Release wird dafür automatisch als
+  "Pre-release" markiert (`prerelease: true`), taucht also auch dort nicht
+  als "Latest release" auf. Kann also z.B. zum Testen des kompletten
+  Release-Workflows für einen noch nicht gemergten Branch genutzt werden,
+  ohne `main`/produktive Nutzer zu beeinflussen — Tag zeigt dabei einfach
+  auf den zu testenden Commit, unabhängig vom Branch:
+
+  ```bash
+  git tag v1.1.0-rc1 <commit-oder-branch>
+  git push origin v1.1.0-rc1
+  ```
+
+  Nicht mehr gebrauchte Pre-Release-Tags danach wieder aufräumen (Tag +
+  GitHub Release + GHCR-Image-Tag jeweils einzeln, `git push --delete` bzw.
+  über die GitHub-UI).
+
   Damit `docker compose pull` (siehe README.md → Ersteinrichtung) ohne
   Login funktioniert, muss das Package einmalig auf **Public** gestellt
   werden: auf GitHub zum Repo → rechte Seitenleiste unter "Packages" auf
