@@ -8,10 +8,10 @@ Bash-Skripte + ein `Dockerfile`, die zusammen ein Borg-Backup-Setup bilden: sich
 ein Host-Verzeichnis per [Borg](https://borgbackup.org/) über SSH in ein Remote-Repo
 (z.B. Hetzner Storage Box). Borg läuft nicht auf dem Host, sondern in einem
 Docker-Container. Es gibt keinen Anwendungscode im klassischen Sinn — die Skripte
-sind die Anwendung. Vollständige Nutzungs-/Setup-Doku steht in `README.md`, dort
-insbesondere die Abschnitte "Sicherheit: zwei Schlüssel gegen Ransomware" und
-"CI & Releases" nicht ohne Grund lesen, bevor an der Auth-Trennung oder der
-Release-Pipeline geändert wird.
+sind die Anwendung. Vollständige Nutzungs-/Setup-Doku steht in `README.md`
+(insbesondere "Sicherheit: zwei Schlüssel gegen Ransomware" nicht ohne Grund
+lesen, bevor an der Auth-Trennung geändert wird), Entwickler-Doku
+(CI/Release-Pipeline, lokale Checks) in `DEVELOPMENT.md`.
 
 ## Git-Workflow
 
@@ -20,21 +20,46 @@ Release-Pipeline geändert wird.
 - Branch-Namen immer mit vorangestelltem Datum: `YYYY-MM-DD_Kurzbeschreibung`,
   z.B. `2026-08-16_Release_Finetuning`.
 
-## Validating changes (keine Testsuite)
+## Validating changes
 
-- Shell-Skripte: `bash -n <script>.sh` für Syntax, danach gegenlesen. Alle Skripte
-  laufen mit `set -Eeuo pipefail`/`set -euo pipefail` — bei Änderungen an
+Kein klassisches Unit-Test-Framework, aber `.github/scripts/functional-test.sh`
+ist ein echter Funktionstest (kompletter Borg-Zyklus inkl. FUSE-Mount gegen
+ein lokales Repo) und läuft überall dort, wo auch Docker läuft — nicht nur in
+CI:
+
+- Shell-Skripte: `bash -n <script>.sh` für Syntax, dazu
+  `shellcheck --severity=warning -- *.sh .github/scripts/*.sh` (SC1091 zum
+  dynamischen `.env`-Sourcen ist erwartet und wird per `--severity`
+  ausgeblendet, nicht per Inline-Disable). Bei Änderungen an
   Subshell-Konstrukten den `set -e`-Fallstrick unten beachten.
+- `Dockerfile`: `docker build -t ci-test:local .` dann
+  `.github/scripts/functional-test.sh ci-test:local` — testet den ganzen
+  Zyklus (`init`/`create`/`list`/`info`/`check`/`extract`/`mount`+FUSE/
+  `prune`/`delete`/`compact`), nicht nur `borg --version`. Zusätzlich
+  `docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile` (Config in
+  `.hadolint.yaml`, DL3008 ist bewusst ignoriert — siehe Kommentar dort).
 - `compose.yml`: `SSH_AUTH_SOCK=/tmp/fake docker compose config` — einmal mit
-  vorhandener `.env`, einmal mit umbenannter/fehlender `.env` testen (muss dann
-  mit einer klaren Fehlermeldung abbrechen, nicht mit leeren Werten durchlaufen).
-- GitHub-Actions-YAML: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/X.yml'))"`.
+  vorhandener `.env`, einmal ohne testen (muss dann mit einer klaren
+  Fehlermeldung abbrechen, nicht mit leeren Werten durchlaufen). **Dafür
+  niemals die echte `.env` im Arbeitsverzeichnis verwenden** — schon einmal
+  aus Versehen passiert (dabei die echte `.env` überschrieben+gelöscht,
+  nur durch eine frühere `cat .env`-Ausgabe im Gesprächsverlauf wieder
+  rekonstruierbar gewesen). Immer in eine Scratch-Kopie kopieren, dort
+  testen.
+- GitHub-Actions-YAML: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/X.yml'))"`
+  für schnelles Parsing, `actionlint` (Docker-Image `rhysd/actionlint:1.7.12`)
+  für echte Validierung inkl. Shellcheck der `run:`-Blöcke — braucht ein
+  Git-Repo im gemounteten Verzeichnis (`no project was found...` sonst).
 - CI-Läufe beobachten: `gh run list --repo tabacha/docker-borg-backup`,
   `gh run watch <id> --repo tabacha/docker-borg-backup --exit-status`.
 - Dieses Arbeitsverzeichnis gehört hier `root`, während als anderer User
   gearbeitet wird → `git` verweigert sich wegen "dubious ownership". Nicht
   global `safe.directory` setzen, sondern pro Aufruf:
   `git -c safe.directory=<repo-pfad> <befehl>`.
+- `docker run -v "$(pwd):/ziel" ...` auf das eigentliche Repo-Verzeichnis
+  kann in manchen Sandbox-Setups mit "mkdir ... file exists" fehlschlagen
+  (Bind-Mount-Quirk, kein Bug im Projekt) — betroffene Dateien dann in ein
+  Scratch-Verzeichnis kopieren und von dort aus mounten.
 
 ## Architecture
 

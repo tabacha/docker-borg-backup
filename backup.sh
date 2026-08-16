@@ -9,7 +9,6 @@ source "${BASE_DIR}/.env"
 set +a
 
 LOG_DIR="${BASE_DIR}/logs"
-LOG_FILE="${LOG_DIR}/backup.log"
 LOCK_FILE="/run/lock/docker-borg-backup.lock"
 SSH_KEY="${BASE_DIR}/secrets/backup_ed25519"
 
