@@ -28,4 +28,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && borg --version
 
+COPY setup-secrets.sh /usr/local/bin/setup-secrets.sh
+RUN chmod +x /usr/local/bin/setup-secrets.sh
+
 ENTRYPOINT ["borg"]

@@ -4,16 +4,18 @@
 # Ersteinrichtung. Idempotent: was schon da ist, wird nicht angefasst,
 # beliebig oft erneut laufen lassen also unproblematisch.
 #
-# Läuft sowohl direkt auf dem Host als auch im borg-admin-Container - braucht
-# nur ssh-keygen/ssh-keyscan (aus openssh-client) und python3, beides ist im
-# Image schon drin:
+# Läuft direkt auf dem Host, wenn dort ssh-keygen/ssh-keyscan vorhanden sind
+# (./setup-secrets.sh), oder ganz ohne Repo-Klon nur mit Docker - das Skript
+# liegt im Image fest unter /usr/local/bin/setup-secrets.sh. BASE_DIR zeigt
+# dann sonst auf /usr/local/bin, deshalb hier per -e überschreiben:
 #
-#   docker run --rm -v "$(pwd):/work" -w /work --entrypoint bash \
-#       ghcr.io/tabacha/docker-borg-backup:latest ./setup-secrets.sh
+#   docker run --rm -v "$(pwd):/work" -e BASE_DIR=/work \
+#       --entrypoint /usr/local/bin/setup-secrets.sh \
+#       ghcr.io/tabacha/docker-borg-backup:latest
 
 set -euo pipefail
 
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="${BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 SECRETS_DIR="${BASE_DIR}/secrets"
 
 if [ ! -f "${BASE_DIR}/.env" ]; then

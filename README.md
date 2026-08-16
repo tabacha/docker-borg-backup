@@ -66,12 +66,14 @@ Repo.
    ./setup-secrets.sh
    ```
 
-   Läuft auch ohne `ssh-keygen`/`ssh-keyscan` auf dem Host, direkt im
-   Container (braucht nur Docker):
+   Läuft auch ohne `ssh-keygen`/`ssh-keyscan` auf dem Host und sogar ganz
+   ohne Repo-Klon, nur mit einer `.env` im aktuellen Verzeichnis — das
+   Skript liegt im Image fest unter `/usr/local/bin/setup-secrets.sh`:
 
    ```bash
-   docker run --rm -v "$(pwd):/work" -w /work --entrypoint bash \
-       ghcr.io/tabacha/docker-borg-backup:latest ./setup-secrets.sh
+   docker run --rm -v "$(pwd):/work" -e BASE_DIR=/work \
+       --entrypoint /usr/local/bin/setup-secrets.sh \
+       ghcr.io/tabacha/docker-borg-backup:latest
    ```
 
    Den ausgegebenen Public Key (`secrets/backup_ed25519.pub`) beim
