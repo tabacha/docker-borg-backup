@@ -54,6 +54,7 @@ Repo.
    | `BORG_SSH_USER/_HOST/_PORT`  | SSH-Zugang zu diesem Zielserver.                                  |
    | `BORG_REPO_PATH`             | Pfad des Repos auf dem Server (z.B. `./borg-backup`).             |
    | `BORG_REMOTE_PATH`           | Name des Borg-Server-Binaries auf dem Remote (Hetzner braucht z.B. `borg-1.4`). |
+   | `TARGET_IPV4_ONLY`           | Erzwingt IPv4 (`ssh -4`) für SSH zu diesem Zielserver — `ssh-keyscan` in `setup-secrets.sh` und borgs eigene SSH-Verbindung. Optional, Standard `false`. |
    | `ARCHIVE_PREFIX`             | Präfix der Archivnamen (`::<prefix>-<zeitstempel>`), auch Filter fürs Prune. |
    | `BACKUP_SOURCE_DIRS`         | Host-Verzeichnis(se), die zu diesem Zielserver gesichert werden (`-> /source/<n>` im Container). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
    | `BORG_CREATE_EXTRA_ARGS`     | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`). Optional. |

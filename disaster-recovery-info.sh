@@ -40,6 +40,11 @@ KNOWN_HOSTS="$(cat "${BASE_DIR}/secrets/${TARGET}/known_hosts")"
 
 BORG_REPO="ssh://${BORG_SSH_USER}@${BORG_SSH_HOST}:${BORG_SSH_PORT}/${BORG_REPO_PATH}"
 
+RESTORE_RSH="ssh -p ${BORG_SSH_PORT} -i ./restore_key -o IdentitiesOnly=yes -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes"
+if [ "${TARGET_IPV4_ONLY:-false}" = "true" ]; then
+    RESTORE_RSH="${RESTORE_RSH} -4"
+fi
+
 cat <<EOF
 ============================================================================
  DISASTER-RECOVERY-INFO - Zielserver "${TARGET}" - erzeugt $(date -Is)
@@ -90,7 +95,7 @@ HOSTKEYS
 export BORG_REPO="${BORG_REPO}"
 export BORG_REMOTE_PATH="${BORG_REMOTE_PATH}"
 export BORG_PASSPHRASE="${PASSPHRASE}"
-export BORG_RSH="ssh -p ${BORG_SSH_PORT} -i ./restore_key -o IdentitiesOnly=yes -o UserKnownHostsFile=./known_hosts -o StrictHostKeyChecking=yes"
+export BORG_RSH="${RESTORE_RSH}"
 
 borg list                        # Welche Archive gibt es?
 borg extract ::<archiv>          # Alles wiederherstellen (ins aktuelle Verzeichnis)

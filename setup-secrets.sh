@@ -69,8 +69,12 @@ echo "README, dort auch der Link auf Hetzners Doku dazu)."
 if [ -s "${SECRETS_DIR}/known_hosts" ]; then
     echo "secrets/${TARGET}/known_hosts existiert schon, überspringe."
 else
+    KEYSCAN_ARGS=(-p "${BORG_SSH_PORT}")
+    if [ "${TARGET_IPV4_ONLY:-false}" = "true" ]; then
+        KEYSCAN_ARGS=(-4 "${KEYSCAN_ARGS[@]}")
+    fi
     echo "Erzeuge secrets/${TARGET}/known_hosts (ssh-keyscan ${BORG_SSH_HOST}:${BORG_SSH_PORT}) ..."
-    ssh-keyscan -p "${BORG_SSH_PORT}" "${BORG_SSH_HOST}" > "${SECRETS_DIR}/known_hosts"
+    ssh-keyscan "${KEYSCAN_ARGS[@]}" "${BORG_SSH_HOST}" > "${SECRETS_DIR}/known_hosts"
 fi
 
 if [ -s "${SECRETS_DIR}/passphrase" ]; then

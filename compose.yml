@@ -36,6 +36,9 @@ services:
           echo 'FEHLER: TARGET ist nicht gesetzt - Skripte immer mit Zielserver-Namen aufrufen, z.B. "backup.sh <target>", siehe README.md' >&2
           exit 1
         fi
+        if [ "$$TARGET_IPV4_ONLY" = "true" ]; then
+          export BORG_RSH="$$BORG_RSH -4"
+        fi
         exec borg "$@"
       - sh
 
@@ -55,6 +58,9 @@ services:
     environment:
       # Fürs Entrypoint-Skript oben - Platzhalter-Fallback wie in volumes:.
       TARGET: "${TARGET:-__ZIELSERVER_FEHLT__}"
+      # Erzwingt "-4" (nur IPv4) fürs Entrypoint-Skript oben, optional,
+      # Standard false - siehe targets/<name>.env.
+      TARGET_IPV4_ONLY: "${TARGET_IPV4_ONLY:-false}"
       SSH_AUTH_SOCK: /ssh-agent
 
       BORG_REPO: "ssh://${BORG_SSH_USER:-__ZIELSERVER_FEHLT__}@${BORG_SSH_HOST:-__ZIELSERVER_FEHLT__}:${BORG_SSH_PORT:-0}/${BORG_REPO_PATH:-__ZIELSERVER_FEHLT__}"
