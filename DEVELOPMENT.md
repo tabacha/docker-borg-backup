@@ -103,12 +103,13 @@ Zwei Workflows unter `.github/workflows/`:
   GitHub Release + GHCR-Image-Tag jeweils einzeln, `git push --delete` bzw.
   über die GitHub-UI).
 
-  Damit `docker compose pull` (siehe README.md → Ersteinrichtung) ohne
-  Login funktioniert, muss das Package einmalig auf **Public** gestellt
-  werden: auf GitHub zum Repo → rechte Seitenleiste unter "Packages" auf
-  das Package klicken → **Package settings** → ganz unten
+  Damit `docker pull` (siehe README.md → Ersteinrichtung) ohne Login
+  funktioniert, muss das Package einmalig auf **Public** gestellt werden:
+  auf GitHub zum Repo → rechte Seitenleiste unter "Packages" auf das
+  Package klicken → **Package settings** → ganz unten
   **Change visibility** → **Public**. Ohne diesen Schritt ist das Image
-  privat und `docker compose pull` bräuchte vorher `docker login ghcr.io`.
+  privat und `docker pull`/`docker compose pull` bräuchten vorher
+  `docker login ghcr.io`.
 
 ## Sonstiges (intern)
 

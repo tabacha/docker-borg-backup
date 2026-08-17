@@ -15,7 +15,7 @@ Repo.
 | Pfad                | Zweck                                                              |
 |----------------------|--------------------------------------------------------------------|
 | `Dockerfile`          | Baut das Borg-Image, inkl. FUSE-Support.      |
-| `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. Braucht die Umgebungsvariable `TARGET` (welcher Zielserver, siehe unten), die alle Skripte selbst setzen. Image kommt vorgebaut von GHCR (`docker compose pull`), `build: .` ist Fallback. |
+| `compose.yml`         | Ein Service `borg-admin`, den alle Skripte via `docker compose run` benutzen. Braucht die Umgebungsvariable `TARGET` (welcher Zielserver, siehe unten), die alle Skripte selbst setzen — jeder `docker compose`-Unterbefehl (auch `pull`/`build`) interpoliert die ganze Datei und scheitert ohne gesetztes `TARGET`, siehe Schritt 5 unten. Image kommt vorgebaut von GHCR, `build: .` ist Fallback. |
 | `DEVELOPMENT.md`      | Für Mitarbeit am Repo selbst: lokale Checks, CI/Release-Pipeline.   |
 | `targets/` / `targets/example.env.example` | Pro Zielserver eine vollständige `targets/<name>.env` (Repo-Zugang, Quellpfade, Hook, Retention, Uptime-Kuma, …) — mehrere Dateien für mehrere unabhängige Zielserver, kein zusätzliches globales `.env`. Siehe [Mehrere Zielserver](#mehrere-zielserver). |
 | `secrets/`            | Pro Zielserver ein Unterverzeichnis `secrets/<name>/` mit eigenem SSH-Key, `known_hosts`, Repo-Passphrase. Pro Host eigen, siehe unten. |
@@ -110,16 +110,31 @@ Repo.
    docker volume create docker-borg-backup_borg-config
    ```
 
-5. **Image holen** (fertig gebaut von GHCR, spart den lokalen Build):
+5. **Image holen** (fertig gebaut von GHCR, spart den lokalen Build).
+   Bewusst `docker pull` statt `docker compose pull`: Jeder
+   `docker compose`-Unterbefehl interpoliert immer die komplette
+   `compose.yml`, auch `pull`/`build` — inklusive der Pflichtvariablen
+   `TARGET`/`BORG_SSH_*` in `volumes:`/`environment:`, die es an dieser
+   Stelle noch gar nicht gibt (die kommen erst aus den Skripten für einen
+   konkreten Zielserver, siehe [Mehrere Zielserver](#mehrere-zielserver)).
+   `docker compose pull` würde deshalb hier immer mit einem
+   `required variable TARGET is missing a value`-Fehler abbrechen:
 
    ```bash
-   docker compose pull
+   docker pull ghcr.io/tabacha/docker-borg-backup:latest
    ```
 
-   Alternativ selbst bauen (z.B. für lokale Änderungen am `Dockerfile`):
+   Landet im selben lokalen Image-Cache, den `docker compose run` danach
+   verwendet. Alternativ selbst bauen (z.B. für lokale Änderungen am
+   `Dockerfile`) — das läuft über `docker compose build` und braucht daher
+   (wie jeder `docker compose`-Aufruf) ein gesetztes `TARGET` mit
+   passender `targets/<name>.env`, z.B. mit der aus Schritt 2 angelegten:
 
    ```bash
-   docker compose build
+   set -a
+   source targets/hetzner1.env
+   set +a
+   TARGET=hetzner1 docker compose build
    ```
 
 6. **Borg-Repo(s) einmalig initialisieren** (nur beim allerersten Mal, für
