@@ -43,14 +43,21 @@ CI:
 - `compose.yml`: `SSH_AUTH_SOCK=/tmp/fake docker compose config` — einmal mit
   vorhandener `targets/<name>.env` (Werte per `set -a; source
   targets/<name>.env; set +a` UND `TARGET=<name>` exportieren, `compose.yml`
-  lädt `targets/*.env` nicht automatisch), einmal ganz ohne testen (muss
-  dann mit einer klaren Fehlermeldung abbrechen — `TARGET`/`BORG_SSH_*` sind
-  über `${VAR:?...}` als Pflichtvariablen markiert). **Dafür niemals die
-  echten `targets/*.env` im Arbeitsverzeichnis verwenden** — schon einmal
-  aus Versehen mit der alten globalen `.env` passiert (dabei die echte
-  `.env` überschrieben+gelöscht, nur durch eine frühere `cat .env`-Ausgabe
-  im Gesprächsverlauf wieder rekonstruierbar gewesen). Immer in eine
-  Scratch-Kopie kopieren, dort testen.
+  lädt `targets/*.env` nicht automatisch), einmal ganz ohne testen. Muss in
+  BEIDEN Fällen erfolgreich sein — `TARGET`/`BORG_SSH_*` sind bewusst KEINE
+  `${VAR:?...}`-Pflichtvariablen mehr (sonst würde schon ein reines
+  `docker compose pull`/`build` vor der ersten Zielserver-Einrichtung
+  scheitern, da jeder `docker compose`-Unterbefehl immer die komplette
+  Datei interpoliert); der Fail-Fast bei fehlendem `TARGET` sitzt
+  stattdessen im `entrypoint:` von `compose.yml` und greift erst beim
+  tatsächlichen Containerstart — dafür braucht es ein echtes Image, testbar
+  z.B. mit `docker compose run --rm borg-admin --version` ohne gesetztes
+  `TARGET`, siehe den entsprechenden Schritt in `ci.yml`.
+  **Dafür niemals die echten `targets/*.env` im Arbeitsverzeichnis
+  verwenden** — schon einmal aus Versehen mit der alten globalen `.env`
+  passiert (dabei die echte `.env` überschrieben+gelöscht, nur durch eine
+  frühere `cat .env`-Ausgabe im Gesprächsverlauf wieder rekonstruierbar
+  gewesen). Immer in eine Scratch-Kopie kopieren, dort testen.
 - GitHub-Actions-YAML: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/X.yml'))"`
   für schnelles Parsing, `actionlint` (Docker-Image `rhysd/actionlint:1.7.12`)
   für echte Validierung inkl. Shellcheck der `run:`-Blöcke — braucht ein
@@ -75,9 +82,18 @@ CI:
 es gibt keine separaten Services für Backup vs. Admin-Operationen — die
 Trennung passiert über *welche Skripte welchen SSH-Key mitbringen*, nicht über
 unterschiedliche Container/Images. `compose.yml` braucht dafür die
-Umgebungsvariable `TARGET` (`${TARGET:?...}`, harter Fehler wenn nicht
-gesetzt) — jedes der vier Skripte exportiert sie aus seinem `<target>`-Arg,
-bevor es `docker compose run` aufruft. `admin-shell.sh` sourced
+Umgebungsvariable `TARGET` — jedes der vier Skripte exportiert sie aus seinem
+`<target>`-Arg, bevor es `docker compose run` aufruft. Fehlt `TARGET` (oder
+eine der `BORG_SSH_*`-Variablen), fällt `compose.yml` NICHT über
+`${VAR:?...}` schon beim Parsen um (das würde auch ein reines
+`docker compose pull`/`build` treffen, die mit `TARGET` gar nichts zu tun
+haben) — stattdessen greift ein Platzhalter-Fallback (`__ZIELSERVER_FEHLT__`)
+in `volumes:`/`environment:`, den der `entrypoint:` des `borg-admin`-Service
+beim tatsächlichen Containerstart erkennt und dann mit der gewohnten klaren
+Fehlermeldung abbricht, bevor `borg` überhaupt aufgerufen wird. Bewusst NICHT
+im Dockerfile/Image selbst geprüft — das Image bleibt dadurch generisch
+(z.B. für `functional-test.sh`, das es ganz ohne `TARGET`/compose per
+`docker run` direkt nutzt). `admin-shell.sh` sourced
 `targets/<target>.env` zusätzlich selbst mit `set -a`, weil `docker compose`
 Variablen nur automatisch aus einer Datei namens `.env` lädt (die es hier
 nicht mehr gibt), nicht aus `targets/*.env`.

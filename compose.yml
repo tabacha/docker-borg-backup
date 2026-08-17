@@ -14,6 +14,31 @@ services:
     security_opt:
       - apparmor:unconfined
 
+    # TARGET/BORG_SSH_* kommen normalerweise aus einer von den Skripten
+    # gesourceten targets/<name>.env. Absichtlich KEIN "${VAR:?...}"
+    # (Pflichtvariable) mehr dafür: JEDER "docker compose"-Unterbefehl -
+    # auch "pull"/"build", die mit TARGET gar nichts zu tun haben -
+    # interpoliert immer die komplette Datei und würde damit schon beim
+    # bloßen Image-Holen abbrechen. Stattdessen ein Platzhalter als
+    # Fallback (unten in volumes:/environment:), den dieser Entrypoint
+    # beim tatsächlichen Containerstart (run/up) erkennt und sofort mit
+    # derselben klaren Fehlermeldung abbricht wie vorher die
+    # Pflichtvariable - nur eben erst dann, wenn TARGET auch wirklich
+    # gebraucht wird. "$$TARGET" (doppeltes $) ist Absicht: einfaches
+    # "$TARGET" würde COMPOSE selbst schon beim Parsen interpolieren
+    # (mit dem Wert vom Host, nicht vom Container) statt es unverändert
+    # an die Shell im Container zu übergeben.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$$TARGET" = "__ZIELSERVER_FEHLT__" ]; then
+          echo 'FEHLER: TARGET ist nicht gesetzt - Skripte immer mit Zielserver-Namen aufrufen, z.B. "backup.sh <target>", siehe README.md' >&2
+          exit 1
+        fi
+        exec borg "$@"
+      - sh
+
     # Kein Host-Quellverzeichnis hier: backup.sh mountet die in
     # BACKUP_SOURCE_DIRS konfigurierten Pfade dynamisch per zusätzlichem
     # "-v" beim "docker compose run" Aufruf (beliebig viele unabhängige
@@ -21,20 +46,22 @@ services:
     # Liste von Volumes deklarieren).
     volumes:
       - ./restore:/restore
-      - ./secrets/${TARGET:?TARGET ist nicht gesetzt - Skripte immer mit Zielserver-Namen aufrufen, z.B. "backup.sh <target>", siehe README.md}/known_hosts:/root/.ssh/known_hosts:ro
-      - ./secrets/${TARGET}/passphrase:/run/secrets/borg-passphrase:ro
+      - ./secrets/${TARGET:-__ZIELSERVER_FEHLT__}/known_hosts:/root/.ssh/known_hosts:ro
+      - ./secrets/${TARGET:-__ZIELSERVER_FEHLT__}/passphrase:/run/secrets/borg-passphrase:ro
       - ${SSH_AUTH_SOCK:-/tmp/ssh-agent-not-set}:/ssh-agent
       - borg-cache:/root/.cache/borg
       - borg-config:/root/.config/borg
 
     environment:
+      # Fürs Entrypoint-Skript oben - Platzhalter-Fallback wie in volumes:.
+      TARGET: "${TARGET:-__ZIELSERVER_FEHLT__}"
       SSH_AUTH_SOCK: /ssh-agent
 
-      BORG_REPO: "ssh://${BORG_SSH_USER:?BORG_SSH_USER ist nicht gesetzt - siehe targets/<name>.env}@${BORG_SSH_HOST:?BORG_SSH_HOST ist nicht gesetzt - siehe targets/<name>.env}:${BORG_SSH_PORT:?BORG_SSH_PORT ist nicht gesetzt - siehe targets/<name>.env}/${BORG_REPO_PATH:?BORG_REPO_PATH ist nicht gesetzt - siehe targets/<name>.env}"
-      BORG_REMOTE_PATH: "${BORG_REMOTE_PATH:?BORG_REMOTE_PATH ist nicht gesetzt - siehe targets/<name>.env}"
+      BORG_REPO: "ssh://${BORG_SSH_USER:-__ZIELSERVER_FEHLT__}@${BORG_SSH_HOST:-__ZIELSERVER_FEHLT__}:${BORG_SSH_PORT:-0}/${BORG_REPO_PATH:-__ZIELSERVER_FEHLT__}"
+      BORG_REMOTE_PATH: "${BORG_REMOTE_PATH:-__ZIELSERVER_FEHLT__}"
       BORG_RSH: >-
         ssh
-        -p ${BORG_SSH_PORT}
+        -p ${BORG_SSH_PORT:-0}
         -o BatchMode=yes
         -o ServerAliveInterval=10
         -o ServerAliveCountMax=30
