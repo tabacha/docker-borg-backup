@@ -29,6 +29,9 @@ jobs:
           docker run --rm -v "$(pwd):/repo" -w /repo \
             rhysd/actionlint:1.7.12 -color
 
+      - name: BORG_CREATE_EXTRA_ARGS/PRUNE_RETENTION - kein Host-Shell-Globbing
+        run: .github/scripts/test-extra-args-glob-safety.sh
+
       - name: compose.yml - mit targets/*.env muss es funktionieren
         run: |
           cp targets/example.env.example targets/example.env

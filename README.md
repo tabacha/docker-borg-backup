@@ -57,7 +57,7 @@ Repo.
    | `TARGET_IPV4_ONLY`           | Erzwingt IPv4 (`ssh -4`) für SSH zu diesem Zielserver — `ssh-keyscan` in `setup-secrets.sh` und borgs eigene SSH-Verbindung. Optional, Standard `false`. |
    | `ARCHIVE_PREFIX`             | Präfix der Archivnamen (`::<prefix>-<zeitstempel>`), auch Filter fürs Prune. |
    | `BACKUP_SOURCE_DIRS`         | Host-Verzeichnis(se), die zu diesem Zielserver gesichert werden (`-> /source/<sprechender-name>` im Container, abgeleitet vom Pfad). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
-   | `BORG_CREATE_EXTRA_ARGS`     | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`). Optional. |
+   | `BORG_CREATE_EXTRA_ARGS`     | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`, `--exclude` mit einem Muster). Optional. |
    | `PRE_BACKUP_HOOK`            | Befehl, der auf dem Host vor `borg create` läuft (z.B. `mongodump`). Optional, bricht den Lauf bei Fehlschlag ab. |
    | `PRUNE_RETENTION`            | Retention-Flags für `borg prune` in `admin-compact.sh`. Optional — auskommentiert lassen übernimmt den Default im Skript. |
    | `UPTIME_KUMA_*`              | Push-Monitor für Backup und Compact DIESES Zielservers. Optional — leer lassen deaktiviert den Push komplett, es wird dann gar kein Request gemacht. |
@@ -199,7 +199,12 @@ mehrere Zeilen):
   Lauf gilt als fehlgeschlagen (Exit-Code + Uptime-Kuma-Push melden das).
 - Optionale `BORG_CREATE_EXTRA_ARGS` werden zusätzlich an `borg create`
   angehängt (z.B. `--exclude-caches`, `--numeric-owner`, `--noatime`,
-  andere `--compression`).
+  andere `--compression`, `--exclude` mit einem Muster wie `*/ImapMail`).
+  Die Variable wird per `read -ra` in einzelne Flags gesplittet (Leerzeichen
+  trennt, keine Anführungszeichen nötig/möglich), aber NICHT von dieser
+  Host-Shell interpretiert — Glob-Sonderzeichen in einem Muster kommen
+  unverändert bei `borg` an und werden von dessen eigenem Pattern-Matching
+  ausgewertet (siehe `targets/example.env.example`).
 - Logs unter `logs/backup-<target>-<zeitstempel>.log`, 30 Tage Aufbewahrung.
 
 ### Wartung — `admin-compact.sh`
