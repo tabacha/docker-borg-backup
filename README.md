@@ -220,13 +220,23 @@ ssh -A user@host /pfad/zum/repo/admin-compact.sh hetzner1
 - Bricht ab, wenn `SSH_AUTH_SOCK` fehlt (`ssh -A` vergessen) oder für
   diesen Zielserver gerade ein Backup/Compact läuft (gleicher Lock wie
   `backup.sh`, siehe oben).
-- Zeigt Archive vorher/nachher, wendet die Retention an (Default
-  `--keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12
-  --keep-yearly 2`, per `PRUNE_RETENTION` in `targets/<name>.env`
-  konfigurierbar, siehe `targets/example.env.example`), kompaktiert danach.
+- Zeigt Archive vorher, wendet die Retention an (Default `--keep-within 2d
+  --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2`, per
+  `PRUNE_RETENTION` in `targets/<name>.env` konfigurierbar, siehe
+  `targets/example.env.example`) und zeigt, was `prune` vormerkt.
+- **Fragt danach explizit nach** (`'ja'` eingeben zum Bestätigen), bevor
+  `compact` läuft: `compact` ist der Punkt ohne Wiederkehr — erst dadurch
+  werden alle bislang nur als gelöscht *markierten* Daten physisch entfernt,
+  auch solche, die schon VOR diesem Lauf markiert wurden (siehe
+  [Sicherheit: zwei Schlüssel gegen Ransomware](#sicherheit-zwei-schlüssel-gegen-ransomware)
+  und [borgbackup/borg#3579](https://github.com/borgbackup/borg/issues/3579)).
+  Ohne Bestätigung (falsche Eingabe, leere Eingabe, nicht-interaktiver
+  Aufruf ohne stdin) bricht das Skript sicher ab — `compact` läuft dann
+  NICHT, Exit-Code ≠ 0.
 - Ausgabe geht aufs Terminal UND nach
   `logs/admin-compact-<target>-<zeitstempel>.log`.
-- Uptime-Kuma-Push wie beim Backup.
+- Uptime-Kuma-Push wie beim Backup — auch bei einem durch den Nutzer
+  abgebrochenen Lauf (kein `compact`), damit das nicht unbemerkt bleibt.
 
 ### Interaktive Shell — `admin-shell.sh`
 
@@ -296,6 +306,10 @@ Daten weder überschreiben noch physisch löschen kann. `borg delete`/`borg
 prune` laufen technisch weiter durch, hinterlassen aber nur einen
 Löschvermerk im Transaktionslog — die Daten selbst bleiben liegen, bis jemand
 mit vollem Zugriff `borg compact` ausführt und den Platz wirklich freigibt.
+Genau deshalb fragt `admin-compact.sh` vor diesem einen Schritt noch einmal
+explizit nach (siehe [Wartung](#wartung--admin-compactsh)) — es ist der
+einzige Moment, an dem eine bereits erfolgte (versehentliche oder böswillige)
+Löschung endgültig unwiderruflich wird.
 
 Daraus folgt die empfohlene Aufteilung in **zwei Keys**:
 
