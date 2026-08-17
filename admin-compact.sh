@@ -32,8 +32,11 @@ LOCK_FILE="/run/lock/docker-borg-backup-${TARGET}.lock"
 
 # Retention für "borg prune". Optional per PRUNE_RETENTION in
 # targets/<name>.env konfigurierbar (z.B. PRUNE_RETENTION="--keep-daily 14
-# --keep-weekly 8 --keep-monthly 24"), sonst dieser Default:
-PRUNE_RETENTION="${PRUNE_RETENTION:---keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2}"
+# --keep-weekly 8 --keep-monthly 24"), sonst dieser Default. Wie
+# BORG_CREATE_EXTRA_ARGS in backup.sh: per read -ra in ein Array splitten,
+# nicht unquoted expandieren - sonst wuerden eventuelle Glob-Sonderzeichen
+# in der Variable von dieser Shell statt von borg interpretiert.
+read -ra PRUNE_RETENTION_ARGS <<< "${PRUNE_RETENTION:---keep-within 2d --keep-daily 7 --keep-weekly 3 --keep-monthly 12 --keep-yearly 2}"
 
 # Uptime-Kuma-Push ist optional: nur aktiv, wenn beide Variablen gesetzt sind.
 PUSH_URL=""
@@ -84,12 +87,11 @@ OUTPUT=$(
 
     echo
     echo "=== Applying retention using ADMIN access ==="
-    # shellcheck disable=SC2086  # PRUNE_RETENTION ist eine absichtliche Flag-Liste
     docker compose run --rm borg-admin prune \
         --list \
         --stats \
         --glob-archives="${ARCHIVE_PREFIX}-*" \
-        ${PRUNE_RETENTION}
+        "${PRUNE_RETENTION_ARGS[@]}"
 
     echo
     echo "=== COMPACT ==="

@@ -92,6 +92,16 @@ sanitize_source_name() {
 
 read -ra SOURCE_DIRS <<< "${BACKUP_SOURCE_DIRS}"
 
+# Wie BACKUP_SOURCE_DIRS oben: per read -ra in ein Array splitten statt die
+# Variable unquoted zu expandieren. Unquoted würde die Shell hier nicht nur
+# auf Leerzeichen splitten, sondern zusätzlich Pathname-Expansion (Globbing)
+# auf jedes Wort anwenden - Exclude-Muster wie "*/ImapMail" wuerden dann
+# relativ zu BASE_DIR (dem cwd von backup.sh, nicht zu den gesicherten
+# Pfaden) expandiert und je nach Zufallstreffer verstuemmelt oder ganz
+# verschluckt. read -ra splittet auf Whitespace, ohne zu globben - Muster
+# kommen dadurch unveraendert bei borg an, das sie selbst interpretiert.
+read -ra BORG_CREATE_EXTRA_ARGS_ARR <<< "${BORG_CREATE_EXTRA_ARGS:-}"
+
 VOLUME_ARGS=()
 declare -A SEEN_NAMES
 i=0
@@ -119,7 +129,6 @@ if [ -n "${PRE_BACKUP_HOOK:-}" ]; then
 fi
 
 if [ "${HOOK_OK}" -eq 1 ]; then
-    # shellcheck disable=SC2086  # BORG_CREATE_EXTRA_ARGS ist eine absichtliche Flag-Liste
     if docker compose \
            run --rm "${VOLUME_ARGS[@]}" borg-admin \
            create \
@@ -127,7 +136,7 @@ if [ "${HOOK_OK}" -eq 1 ]; then
            --stats \
            --show-rc \
            --compression zstd,6 \
-           ${BORG_CREATE_EXTRA_ARGS:-} \
+           "${BORG_CREATE_EXTRA_ARGS_ARR[@]}" \
            "::${HOST}-{now:%Y-%m-%dT%H:%M:%S}" \
            /source
     then
