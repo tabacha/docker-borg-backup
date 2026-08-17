@@ -19,8 +19,11 @@ nicht nur in CI. Das ist auch, was `ci.yml`/`release.yml` selbst benutzen,
 lokal reproduzierbar:
 
 ```bash
-# Shell-Syntax + Lint (SC1091 zum dynamischen .env-Sourcen ist erwartet,
-# alle Skripte sourcen .env dynamisch zur Laufzeit):
+# Shell-Syntax + Lint. Jedes Skript sourced dynamisch genau eine
+# targets/<target>.env - das braucht einen "# shellcheck source=/dev/null"
+# direkt darüber (siehe backup.sh & Co.), sonst SC1090 (non-constant
+# source), das anders als SC1091 nicht per --severity=warning gefiltert
+# wird:
 bash -n *.sh .github/scripts/*.sh
 shellcheck --severity=warning -- *.sh .github/scripts/*.sh
 
@@ -31,10 +34,16 @@ docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
 # Workflow-YAML (inkl. Shellcheck der run:-Blöcke):
 docker run --rm -v "$(pwd):/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
-# compose.yml: einmal mit vorhandener .env, einmal ohne (muss dann sauber
-# abbrechen statt mit leeren Werten durchzulaufen). NICHT gegen die echte
-# .env laufen lassen, sondern in einer Kopie testen.
-SSH_AUTH_SOCK=/tmp/fake docker compose config
+# compose.yml: Parsen (docker compose config) muss IMMER klappen, auch
+# ganz ohne targets/*.env - sonst würde z.B. "docker compose pull" vor der
+# ersten Zielserver-Einrichtung fehlschlagen. Der eigentliche Fail-Fast bei
+# fehlendem TARGET passiert erst beim Containerstart (Entrypoint in
+# compose.yml), NICHT mehr beim Parsen - das braucht ein echtes Image, s.
+# den docker-compose-run-Test weiter unten. NICHT gegen die echten
+# targets/*.env laufen lassen, sondern in einer Kopie testen.
+cp targets/example.env.example targets/example.env
+set -a && source targets/example.env && set +a
+TARGET=example SSH_AUTH_SOCK=/tmp/fake docker compose config
 
 # Image + kompletter Borg-Zyklus (init/create/list/info/check/extract/
 # mount+FUSE/prune/delete/compact) gegen ein lokales Repo, kein SSH nötig:
@@ -53,9 +62,13 @@ Zwei Workflows unter `.github/workflows/`:
   - Job `lint`: `shellcheck` (alle `*.sh`), `hadolint` (`Dockerfile`,
     Konfiguration in `.hadolint.yaml`), `actionlint` (die Workflow-Dateien
     selbst, inkl. Shellcheck der `run:`-Blöcke), `docker compose config`
-    einmal mit und einmal ohne `.env` (muss im zweiten Fall sauber
-    fehlschlagen).
-  - Job `build-and-test`: baut das Image und lässt
+    einmal mit und einmal ganz ohne `targets/<name>.env` — muss in BEIDEN
+    Fällen klappen (kein `TARGET`-Pflichtvariablen-Check mehr beim reinen
+    Parsen, siehe compose.yml).
+  - Job `build-and-test`: baut das Image, prüft danach per
+    `docker compose run` ohne `TARGET`, dass der Container beim Start
+    sauber mit der bekannten Fehlermeldung abbricht (Gegenstück zum
+    Parsen-Test oben), und lässt zuletzt
     `.github/scripts/functional-test.sh` drüberlaufen — kompletter
     Borg-Zyklus (`init`/`create`/`list`/`info`/`check`/`extract`/`mount`
     inkl. echtem FUSE-Mount/`prune`/`delete`/`compact`) gegen ein lokales

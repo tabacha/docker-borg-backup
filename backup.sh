@@ -4,13 +4,31 @@ set -Eeuo pipefail
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+TARGET="${1:?Usage: backup.sh <target> (siehe targets/*.env.example, README.md)}"
+
+if [[ ! "${TARGET}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: Zielserver-Name '${TARGET}' ungültig (nur Buchstaben, Ziffern, - und _)." >&2
+    exit 1
+fi
+
+TARGET_ENV="${BASE_DIR}/targets/${TARGET}.env"
+
+if [ ! -f "${TARGET_ENV}" ]; then
+    echo "ERROR: ${TARGET_ENV} fehlt." >&2
+    echo "Erst 'cp targets/example.env.example targets/${TARGET}.env' und ausfüllen (siehe README.md)." >&2
+    exit 1
+fi
+
+export TARGET
+
 set -a
-source "${BASE_DIR}/.env"
+# shellcheck source=/dev/null
+source "${TARGET_ENV}"
 set +a
 
 LOG_DIR="${BASE_DIR}/logs"
-LOCK_FILE="/run/lock/docker-borg-backup.lock"
-SSH_KEY="${BASE_DIR}/secrets/backup_ed25519"
+LOCK_FILE="/run/lock/docker-borg-backup-${TARGET}.lock"
+SSH_KEY="${BASE_DIR}/secrets/${TARGET}/backup_ed25519"
 
 # Uptime-Kuma-Push ist optional: nur aktiv, wenn beide Variablen gesetzt sind.
 PUSH_URL=""
@@ -25,28 +43,29 @@ mkdir -p "${LOG_DIR}"
 # Logs älter als 30 Tage löschen.
 find "${LOG_DIR}" \
     -type f \
-    -name 'backup-*.log' \
+    -name "backup-${TARGET}-*.log" \
     -mtime +30 \
     -delete \
     >/dev/null 2>&1 || true
 
 # Pro Lauf eine eigene Logdatei.
-RUN_LOG="${LOG_DIR}/backup-$(date '+%Y-%m-%d_%H-%M-%S').log"
+RUN_LOG="${LOG_DIR}/backup-${TARGET}-$(date '+%Y-%m-%d_%H-%M-%S').log"
 
 # Ab hier absolut keine Ausgabe mehr auf stdout/stderr.
 exec >"${RUN_LOG}" 2>&1
 
-# Exklusiver Lock.
+# Exklusiver Lock, pro Zielserver - Backups zu verschiedenen Zielservern
+# blockieren sich dadurch nicht gegenseitig.
 exec 9>"${LOCK_FILE}"
 
-# Wenn bereits ein Backup läuft: still beenden.
+# Wenn für diesen Zielserver bereits ein Backup läuft: still beenden.
 if ! flock -n 9; then
     exit 0
 fi
 
 cd "${BASE_DIR}"
 
-echo "Started: $(date -Is)"
+echo "Started: $(date -Is) (target: ${TARGET})"
 
 # Eigenen SSH-Agent starten und am Ende in jedem Fall wieder entladen.
 eval "$(ssh-agent -s)"
@@ -55,21 +74,70 @@ trap 'ssh-agent -k >/dev/null' EXIT
 ssh-add "${SSH_KEY}"
 export SSH_AUTH_SOCK
 
+# Quellpfade aus BACKUP_SOURCE_DIRS (leerzeichengetrennt) einzeln unter
+# /source/<sprechender-name> mounten - erlaubt mehrere unabhängige
+# Verzeichnisbäume ohne gemeinsames Elternverzeichnis. Der Name leitet sich
+# aus dem Host-Pfad ab (führender/abschließender Slash weg, verbleibende
+# Slashes -> Bindestrich), damit im Archiv nachvollziehbar bleibt, was
+# "source/2" mal war - andere Zeichen im Pfad sind für Docker/Borg
+# unproblematisch und bleiben unangetastet. Bei zufälligen
+# Namenskollisionen (z.B. "/data/a" und "/data-a") hängt eine laufende
+# Nummer an, damit kein Mount den anderen überschreibt.
+sanitize_source_name() {
+    local name="${1#/}"
+    name="${name%/}"
+    name="${name//\//-}"
+    printf '%s' "${name:-root}"
+}
+
+read -ra SOURCE_DIRS <<< "${BACKUP_SOURCE_DIRS}"
+
+VOLUME_ARGS=()
+declare -A SEEN_NAMES
+i=0
+for DIR in "${SOURCE_DIRS[@]}"; do
+    i=$((i + 1))
+    NAME="$(sanitize_source_name "${DIR}")"
+    if [ -n "${SEEN_NAMES[${NAME}]+x}" ]; then
+        NAME="${NAME}-${i}"
+    fi
+    SEEN_NAMES[${NAME}]=1
+    VOLUME_ARGS+=(-v "${DIR}:/source/${NAME}:ro")
+done
+
 START=$SECONDS
 
-if docker compose \
-       run --rm borg-admin \
-       create \
-        --lock-wait 600 \
-	--stats \
-	--show-rc \
-	--compression zstd,6 \
-	"::${HOST}-{now:%Y-%m-%dT%H:%M:%S}" \
-	/source
-then
-    RC=0
+# Optionaler Pre-Backup-Hook (z.B. "mongodump" vor dem Sichern einer
+# laufenden MongoDB-Instanz). Schlägt er fehl, wird "borg create"
+# übersprungen und der Lauf gilt als fehlgeschlagen.
+HOOK_OK=1
+if [ -n "${PRE_BACKUP_HOOK:-}" ]; then
+    echo "=== Pre-Backup-Hook ==="
+    if ! bash -c "${PRE_BACKUP_HOOK}"; then
+        HOOK_OK=0
+    fi
+fi
+
+if [ "${HOOK_OK}" -eq 1 ]; then
+    # shellcheck disable=SC2086  # BORG_CREATE_EXTRA_ARGS ist eine absichtliche Flag-Liste
+    if docker compose \
+           run --rm "${VOLUME_ARGS[@]}" borg-admin \
+           create \
+           --lock-wait 600 \
+           --stats \
+           --show-rc \
+           --compression zstd,6 \
+           ${BORG_CREATE_EXTRA_ARGS:-} \
+           "::${HOST}-{now:%Y-%m-%dT%H:%M:%S}" \
+           /source
+    then
+        RC=0
+    else
+        RC=$?
+    fi
 else
-    RC=$?
+    echo "Pre-Backup-Hook fehlgeschlagen - borg create wird übersprungen."
+    RC=1
 fi
 
 DURATION=$(( SECONDS - START ))
@@ -79,10 +147,10 @@ echo "Return code: ${RC}"
 
 if [ "${RC}" == "0" ]; then
     STATUS=up
-    MSG="OK"
+    MSG="OK (${TARGET})"
 else
     STATUS=down
-    MSG="borg backup fehlgeschlagen (exit ${RC}): $(tail -n 5 "${RUN_LOG}" | tr '\n' ' ')"
+    MSG="borg backup fehlgeschlagen (${TARGET}, exit ${RC}): $(tail -n 5 "${RUN_LOG}" | tr '\n' ' ')"
 fi
 
 if [ -n "${PUSH_URL}" ]; then
@@ -93,5 +161,3 @@ if [ -n "${PUSH_URL}" ]; then
 fi
 
 exit "${RC}"
-
-

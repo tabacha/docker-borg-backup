@@ -28,10 +28,12 @@ ein lokales Repo) und läuft überall dort, wo auch Docker läuft — nicht nur 
 CI:
 
 - Shell-Skripte: `bash -n <script>.sh` für Syntax, dazu
-  `shellcheck --severity=warning -- *.sh .github/scripts/*.sh` (SC1091 zum
-  dynamischen `.env`-Sourcen ist erwartet und wird per `--severity`
-  ausgeblendet, nicht per Inline-Disable). Bei Änderungen an
-  Subshell-Konstrukten den `set -e`-Fallstrick unten beachten.
+  `shellcheck --severity=warning -- *.sh .github/scripts/*.sh`. Jedes
+  Skript sourced dynamisch genau eine `targets/<target>.env` — das braucht
+  einen `# shellcheck source=/dev/null` direkt darüber (siehe backup.sh &
+  Co.), sonst SC1090 (non-constant source), das anders als das alte SC1091
+  bei `.env` (gab's bis v1.0.x) nicht per `--severity` gefiltert wird. Bei
+  Änderungen an Subshell-Konstrukten den `set -e`-Fallstrick unten beachten.
 - `Dockerfile`: `docker build -t ci-test:local .` dann
   `.github/scripts/functional-test.sh ci-test:local` — testet den ganzen
   Zyklus (`init`/`create`/`list`/`info`/`check`/`extract`/`mount`+FUSE/
@@ -39,13 +41,23 @@ CI:
   `docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile` (Config in
   `.hadolint.yaml`, DL3008 ist bewusst ignoriert — siehe Kommentar dort).
 - `compose.yml`: `SSH_AUTH_SOCK=/tmp/fake docker compose config` — einmal mit
-  vorhandener `.env`, einmal ohne testen (muss dann mit einer klaren
-  Fehlermeldung abbrechen, nicht mit leeren Werten durchlaufen). **Dafür
-  niemals die echte `.env` im Arbeitsverzeichnis verwenden** — schon einmal
-  aus Versehen passiert (dabei die echte `.env` überschrieben+gelöscht,
-  nur durch eine frühere `cat .env`-Ausgabe im Gesprächsverlauf wieder
-  rekonstruierbar gewesen). Immer in eine Scratch-Kopie kopieren, dort
-  testen.
+  vorhandener `targets/<name>.env` (Werte per `set -a; source
+  targets/<name>.env; set +a` UND `TARGET=<name>` exportieren, `compose.yml`
+  lädt `targets/*.env` nicht automatisch), einmal ganz ohne testen. Muss in
+  BEIDEN Fällen erfolgreich sein — `TARGET`/`BORG_SSH_*` sind bewusst KEINE
+  `${VAR:?...}`-Pflichtvariablen mehr (sonst würde schon ein reines
+  `docker compose pull`/`build` vor der ersten Zielserver-Einrichtung
+  scheitern, da jeder `docker compose`-Unterbefehl immer die komplette
+  Datei interpoliert); der Fail-Fast bei fehlendem `TARGET` sitzt
+  stattdessen im `entrypoint:` von `compose.yml` und greift erst beim
+  tatsächlichen Containerstart — dafür braucht es ein echtes Image, testbar
+  z.B. mit `docker compose run --rm borg-admin --version` ohne gesetztes
+  `TARGET`, siehe den entsprechenden Schritt in `ci.yml`.
+  **Dafür niemals die echten `targets/*.env` im Arbeitsverzeichnis
+  verwenden** — schon einmal aus Versehen mit der alten globalen `.env`
+  passiert (dabei die echte `.env` überschrieben+gelöscht, nur durch eine
+  frühere `cat .env`-Ausgabe im Gesprächsverlauf wieder rekonstruierbar
+  gewesen). Immer in eine Scratch-Kopie kopieren, dort testen.
 - GitHub-Actions-YAML: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/X.yml'))"`
   für schnelles Parsing, `actionlint` (Docker-Image `rhysd/actionlint:1.7.12`)
   für echte Validierung inkl. Shellcheck der `run:`-Blöcke — braucht ein
@@ -69,16 +81,40 @@ CI:
 `docker compose run --rm borg-admin ...` mit unterschiedlichen Argumenten auf,
 es gibt keine separaten Services für Backup vs. Admin-Operationen — die
 Trennung passiert über *welche Skripte welchen SSH-Key mitbringen*, nicht über
-unterschiedliche Container/Images.
+unterschiedliche Container/Images. `compose.yml` braucht dafür die
+Umgebungsvariable `TARGET` — jedes der vier Skripte exportiert sie aus seinem
+`<target>`-Arg, bevor es `docker compose run` aufruft. Fehlt `TARGET` (oder
+eine der `BORG_SSH_*`-Variablen), fällt `compose.yml` NICHT über
+`${VAR:?...}` schon beim Parsen um (das würde auch ein reines
+`docker compose pull`/`build` treffen, die mit `TARGET` gar nichts zu tun
+haben) — stattdessen greift ein Platzhalter-Fallback (`__ZIELSERVER_FEHLT__`)
+in `volumes:`/`environment:`, den der `entrypoint:` des `borg-admin`-Service
+beim tatsächlichen Containerstart erkennt und dann mit der gewohnten klaren
+Fehlermeldung abbricht, bevor `borg` überhaupt aufgerufen wird. Bewusst NICHT
+im Dockerfile/Image selbst geprüft — das Image bleibt dadurch generisch
+(z.B. für `functional-test.sh`, das es ganz ohne `TARGET`/compose per
+`docker run` direkt nutzt). `admin-shell.sh` sourced
+`targets/<target>.env` zusätzlich selbst mit `set -a`, weil `docker compose`
+Variablen nur automatisch aus einer Datei namens `.env` lädt (die es hier
+nicht mehr gibt), nicht aus `targets/*.env`.
 
-### Config kommt komplett aus `.env` + `secrets/`, nie hartcodiert
+### Config kommt komplett aus `targets/<name>.env` + `secrets/`, nie hartcodiert
 
 Alles Deployment-Spezifische (Storage-Box-Zugangsdaten, Archiv-Präfix,
-Push-Tokens, Backup-Quellpfad) steht in `.env` (git-ignored; `.env.example`
-ist die Vorlage). Geheimnisse/Keys liegen in `secrets/` (ebenfalls
-git-ignored). Weder `compose.yml` noch die Skripte dürfen wieder Werte wie den
-Storage-Box-Username hartcodieren — genau das wurde bewusst herausrefactort,
-damit das Repo öffentlich auf GitHub liegen kann.
+Push-Tokens, Backup-Quellpfade, Pre-Backup-Hook) steht pro Zielserver in
+`targets/<name>.env` (git-ignored; `targets/example.env.example` ist die
+Vorlage). Es gibt bewusst KEIN zusätzliches globales `.env` mehr (gab es bis
+v1.0.x, wurde entfernt, damit eine Migration/ein neuer Zielserver ein
+einziges `cp`/`mv` ist statt zwei Dateien synchron zu halten) — jede
+`targets/<name>.env` ist für sich vollständig, auch wenn sich Werte wie
+Quellpfade zwischen mehreren Zielservern desselben Hosts dadurch wiederholen
+können. Geheimnisse/Keys liegen pro Zielserver in `secrets/<name>/`
+(ebenfalls git-ignored). Weder `compose.yml` noch die Skripte dürfen wieder
+Werte wie den Storage-Box-Username hartcodieren — genau das wurde bewusst
+herausrefactort, damit das Repo öffentlich auf GitHub liegen kann.
+
+Migration von der alten Ein-`.env`-Struktur (v1.0.x): `migrate-to-v1.1.sh
+<name>`, siehe README.md → "Migration von v1.0.x auf v1.1.0".
 
 `BASE_DIR` wird in jedem Skript aus dem eigenen Pfad ermittelt
 (`$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)`), nicht hartcodiert — das
@@ -87,23 +123,28 @@ Repo muss aus jedem Klon-Pfad heraus funktionieren.
 ### Zwei-Schlüssel-Sicherheitsmodell
 
 Das ist die zentrale Design-Entscheidung im Repo (Details: README →
-"Sicherheit: zwei Schlüssel gegen Ransomware"):
+"Sicherheit: zwei Schlüssel gegen Ransomware"). Alle vier Skripte nehmen als
+erstes Argument einen Zielserver-Namen (`<target>`, siehe README →
+"Mehrere Zielserver") und operieren nur auf dessen Repo:
 
 | Skript | Trigger | Auth |
 |---|---|---|
-| `backup.sh` | Cron, unbeaufsichtigt | **Backup-Key** aus `secrets/backup_ed25519` — baut sich pro Lauf einen eigenen `ssh-agent` auf und killt ihn per `trap ... EXIT` garantiert wieder. Soll serverseitig auf Append-Only beschränkt sein. |
-| `admin-compact.sh` | Manuell, `ssh -A` | **Admin-Key** — existiert absichtlich NIE als Datei in `secrets/` oder sonst im Repo, sondern muss per Agent-Forwarding (`SSH_AUTH_SOCK`) mitgebracht werden. |
-| `admin-shell.sh` | Manuell, `ssh -tA` (echtes TTY nötig) | Admin-Key wie oben. |
-| `disaster-recovery-info.sh` | Manuell, lokal | Kein SSH nötig — liest nur `.env`/`secrets/passphrase`/`secrets/known_hosts` und druckt, spricht nicht mit Docker/Repo-Server. |
+| `backup.sh <target>` | Cron, unbeaufsichtigt | **Backup-Key** aus `secrets/<target>/backup_ed25519` — baut sich pro Lauf einen eigenen `ssh-agent` auf und killt ihn per `trap ... EXIT` garantiert wieder. Soll serverseitig auf Append-Only beschränkt sein. |
+| `admin-compact.sh <target>` | Manuell, `ssh -A` | **Admin-Key** — existiert absichtlich NIE als Datei in `secrets/` oder sonst im Repo, sondern muss per Agent-Forwarding (`SSH_AUTH_SOCK`) mitgebracht werden. |
+| `admin-shell.sh <target>` | Manuell, `ssh -tA` (echtes TTY nötig) | Admin-Key wie oben. |
+| `disaster-recovery-info.sh <target>` | Manuell, lokal | Kein SSH nötig — liest nur `targets/<target>.env`/`secrets/<target>/passphrase`/`secrets/<target>/known_hosts` und druckt, spricht nicht mit Docker/Repo-Server. |
 
 Wer diese Skripte ändert: Diese Trennung nicht aufweichen (z.B.
 `admin-compact.sh`/`admin-shell.sh` nie einen eigenen Key aus `secrets/`
 nehmen lassen — der Witz ist, dass der mächtige Key nie auf dem gesicherten
-Host als Datei liegt).
+Host als Datei liegt). Der Admin-Key selbst ist NICHT pro Zielserver
+getrennt (er landet ja nie als Datei hier) — ein Admin-`ssh-agent` kann
+mehrere Admin-Keys für mehrere Zielserver gleichzeitig vorhalten.
 
-Alle vier Skripte außer `disaster-recovery-info.sh` nehmen denselben `flock`
-auf `/run/lock/docker-borg-backup.lock`, damit sich Backup/Compact/interaktive
-Shell nicht überlappen.
+Alle vier Skripte außer `disaster-recovery-info.sh` nehmen denselben `flock`,
+aber PRO ZIELSERVER: `/run/lock/docker-borg-backup-<target>.lock` — Backup/
+Compact/interaktive Shell für DENSELBEN Zielserver überlappen sich dadurch
+nicht, verschiedene Zielserver blockieren sich aber nicht gegenseitig.
 
 ### `set -e`-Fallstrick in `admin-compact.sh`
 

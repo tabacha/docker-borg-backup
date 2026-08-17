@@ -17,8 +17,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          # --severity=warning: SC1091 ("kann .env nicht folgen") ist
-          # erwartet, alle Skripte sourcen .env dynamisch zur Laufzeit.
           shellcheck --severity=warning -- *.sh .github/scripts/*.sh
 
       - name: hadolint
@@ -31,18 +29,25 @@ jobs:
           docker run --rm -v "$(pwd):/repo" -w /repo \
             rhysd/actionlint:1.7.12 -color
 
-      - name: compose.yml - mit .env muss es funktionieren
+      - name: compose.yml - mit targets/*.env muss es funktionieren
         run: |
-          cp .env.example .env
-          SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
+          cp targets/example.env.example targets/example.env
+          set -a
+          source targets/example.env
+          set +a
+          TARGET=example SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
 
-      - name: compose.yml - ohne .env muss es sauber abbrechen
+      - name: compose.yml - Parsen funktioniert auch ohne TARGET/targets/*.env
+        # Wichtig für "docker compose pull"/"build" vor der ersten
+        # Zielserver-Einrichtung: compose.yml darf beim reinen Parsen nie an
+        # fehlendem TARGET scheitern (kein "${VAR:?...}" mehr dafür, siehe
+        # compose.yml). Der eigentliche Fail-Fast bei fehlendem TARGET
+        # passiert erst beim Containerstart - siehe "compose.yml - ohne
+        # TARGET muss der Container beim Start abbrechen" im
+        # build-and-test-Job.
         run: |
-          rm -f .env
-          if SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null 2>&1; then
-            echo "::error::docker compose config sollte ohne .env fehlschlagen, tat es aber nicht"
-            exit 1
-          fi
+          rm -f targets/example.env
+          SSH_AUTH_SOCK=/tmp/fake docker compose config >/dev/null
 
   build-and-test:
     runs-on: ubuntu-latest
@@ -51,6 +56,32 @@ jobs:
 
       - name: Build image
         run: docker build -t ci-test:local .
+
+      - name: compose.yml - ohne TARGET muss der Container beim Start abbrechen
+        # Gegenstück zum Parsen-Test im lint-Job: hier läuft der Container
+        # wirklich (kein TARGET gesetzt, keine targets/*.env vorhanden) -
+        # der Entrypoint in compose.yml muss das sofort erkennen und mit der
+        # bekannten Fehlermeldung abbrechen, statt z.B. mit Platzhaltern
+        # als Repo-Adresse loszulaufen.
+        run: |
+          docker tag ci-test:local ghcr.io/tabacha/docker-borg-backup:latest
+          docker volume create docker-borg-backup_borg-cache >/dev/null
+          docker volume create docker-borg-backup_borg-config >/dev/null
+          set +e
+          OUTPUT=$(SSH_AUTH_SOCK=/tmp/fake docker compose run --rm borg-admin --version 2>&1)
+          RC=$?
+          set -e
+          if [ "${RC}" -eq 0 ]; then
+            echo "::error::borg-admin sollte ohne TARGET/targets/<name>.env fehlschlagen, tat es aber nicht"
+            echo "${OUTPUT}"
+            exit 1
+          fi
+          if ! echo "${OUTPUT}" | grep -q "TARGET ist nicht gesetzt"; then
+            echo "::error::erwartete Fehlermeldung fehlt"
+            echo "${OUTPUT}"
+            exit 1
+          fi
+          echo "OK: ${OUTPUT}"
 
       - name: Funktionstest (lokales Repo, FUSE-Mount)
         run: .github/scripts/functional-test.sh ci-test:local
