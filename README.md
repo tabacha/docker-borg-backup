@@ -56,7 +56,7 @@ Repo.
    | `BORG_REMOTE_PATH`           | Name des Borg-Server-Binaries auf dem Remote (Hetzner braucht z.B. `borg-1.4`). |
    | `TARGET_IPV4_ONLY`           | Erzwingt IPv4 (`ssh -4`) für SSH zu diesem Zielserver — `ssh-keyscan` in `setup-secrets.sh` und borgs eigene SSH-Verbindung. Optional, Standard `false`. |
    | `ARCHIVE_PREFIX`             | Präfix der Archivnamen (`::<prefix>-<zeitstempel>`), auch Filter fürs Prune. |
-   | `BACKUP_SOURCE_DIRS`         | Host-Verzeichnis(se), die zu diesem Zielserver gesichert werden (`-> /source/<n>` im Container). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
+   | `BACKUP_SOURCE_DIRS`         | Host-Verzeichnis(se), die zu diesem Zielserver gesichert werden (`-> /source/<sprechender-name>` im Container, abgeleitet vom Pfad). Mehrere unabhängige Verzeichnisbäume durch Leerzeichen getrennt. |
    | `BORG_CREATE_EXTRA_ARGS`     | Zusätzliche `borg create`-Flags (z.B. `--exclude-caches`, `--numeric-owner`). Optional. |
    | `PRE_BACKUP_HOOK`            | Befehl, der auf dem Host vor `borg create` läuft (z.B. `mongodump`). Optional, bricht den Lauf bei Fehlschlag ab. |
    | `PRUNE_RETENTION`            | Retention-Flags für `borg prune` in `admin-compact.sh`. Optional — auskommentiert lassen übernimmt den Default im Skript. |
@@ -188,8 +188,11 @@ mehrere Zeilen):
   zweiter Lauf still mit Exit 0. Verschiedene Zielserver blockieren sich
   dabei nicht gegenseitig.
 - Sichert alle in `BACKUP_SOURCE_DIRS` konfigurierten Pfade (einer oder
-  mehrere, durch Leerzeichen getrennt) — jeder landet unter `source/<n>/`
-  im Archiv, `n` fortlaufend in der angegebenen Reihenfolge.
+  mehrere, durch Leerzeichen getrennt) — jeder landet im Archiv unter
+  `source/<name>/`, wobei `<name>` vom Host-Pfad abgeleitet ist (führender/
+  abschließender Slash weg, verbleibende Slashes → Bindestrich, z.B. wird
+  aus `/srv/rocketchat` → `source/srv-rocketchat/`). Kollidieren zwei Pfade
+  zufällig auf denselben Namen, hängt eine laufende Nummer an.
 - Optionaler `PRE_BACKUP_HOOK` (z.B. `mongodump` vor dem Sichern einer
   laufenden MongoDB/Rocket.Chat-Instanz) läuft auf dem Host, direkt vor
   `borg create`. Schlägt er fehl, wird `borg create` übersprungen und der

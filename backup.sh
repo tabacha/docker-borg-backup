@@ -75,17 +75,34 @@ ssh-add "${SSH_KEY}"
 export SSH_AUTH_SOCK
 
 # Quellpfade aus BACKUP_SOURCE_DIRS (leerzeichengetrennt) einzeln unter
-# /source/<lfd. Nummer> mounten - erlaubt mehrere unabhängige
-# Verzeichnisbäume ohne gemeinsames Elternverzeichnis.
+# /source/<sprechender-name> mounten - erlaubt mehrere unabhängige
+# Verzeichnisbäume ohne gemeinsames Elternverzeichnis. Der Name leitet sich
+# aus dem Host-Pfad ab (führender/abschließender Slash weg, verbleibende
+# Slashes -> Bindestrich), damit im Archiv nachvollziehbar bleibt, was
+# "source/2" mal war - andere Zeichen im Pfad sind für Docker/Borg
+# unproblematisch und bleiben unangetastet. Bei zufälligen
+# Namenskollisionen (z.B. "/data/a" und "/data-a") hängt eine laufende
+# Nummer an, damit kein Mount den anderen überschreibt.
+sanitize_source_name() {
+    local name="${1#/}"
+    name="${name%/}"
+    name="${name//\//-}"
+    printf '%s' "${name:-root}"
+}
+
 read -ra SOURCE_DIRS <<< "${BACKUP_SOURCE_DIRS}"
 
 VOLUME_ARGS=()
-SOURCE_PATHS=()
+declare -A SEEN_NAMES
 i=0
 for DIR in "${SOURCE_DIRS[@]}"; do
     i=$((i + 1))
-    VOLUME_ARGS+=(-v "${DIR}:/source/${i}:ro")
-    SOURCE_PATHS+=("/source/${i}")
+    NAME="$(sanitize_source_name "${DIR}")"
+    if [ -n "${SEEN_NAMES[${NAME}]+x}" ]; then
+        NAME="${NAME}-${i}"
+    fi
+    SEEN_NAMES[${NAME}]=1
+    VOLUME_ARGS+=(-v "${DIR}:/source/${NAME}:ro")
 done
 
 START=$SECONDS
@@ -112,7 +129,7 @@ if [ "${HOOK_OK}" -eq 1 ]; then
            --compression zstd,6 \
            ${BORG_CREATE_EXTRA_ARGS:-} \
            "::${HOST}-{now:%Y-%m-%dT%H:%M:%S}" \
-           "${SOURCE_PATHS[@]}"
+           /source
     then
         RC=0
     else
