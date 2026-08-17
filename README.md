@@ -10,6 +10,16 @@ Remote-Repo (z.B. eine Hetzner Storage Box). Borg läuft dabei nicht auf dem Hos
 selbst, sondern in einem Docker-Container, gebaut aus dem `Dockerfile` in diesem
 Repo.
 
+Gegenstück (und Schwesterprojekt) ist
+[docker-borg-backup-server](https://github.com/tabacha/docker-borg-backup-server):
+damit lässt sich das Backup-Ziel selbst sicher betreiben — Forced Commands,
+ein eigener isolierter Unix-Account pro Client, Append-Only serverseitig
+durchgesetzt, statt Hetzner oder einen generischen SSH-Server von Hand
+einzurichten (siehe unten). Beide Repos setzen zusammen dasselbe "zwei
+Schlüssel gegen Ransomware"-Modell um (siehe
+[Sicherheit: zwei Schlüssel](#sicherheit-zwei-schlüssel-gegen-ransomware)
+weiter unten).
+
 ## Verzeichnisstruktur
 
 | Pfad                | Zweck                                                              |
@@ -318,6 +328,20 @@ Daraus folgt die empfohlene Aufteilung in **zwei Keys**:
 | **Backup-Key** (`secrets/<target>/backup_ed25519`, einer PRO Zielserver) | Als Datei auf dem gesicherten Host (unvermeidbar für unbeaufsichtigten Cron-Betrieb) | Nur **append-only**: neue Archive schreiben, nichts endgültig löschen | `backup.sh <target>` |
 | **Admin-Key** | NUR im eigenen SSH-Agent des Admins (per `ssh -A`/`ssh -tA` weitergereicht) — landet nie als Datei auf dem gesicherten Host. Ein Agent kann mehrere Admin-Keys für mehrere Zielserver gleichzeitig vorhalten, SSH probiert beim Connect passend durch. | Voll: `prune`, `compact`, `delete` | `admin-compact.sh <target>`, `admin-shell.sh <target>` |
 
+Der Admin-Key ist bewusst nicht auf eine einzelne Person festgelegt: Es kann
+sinnvoll sein, für denselben Zielserver mehrere Admin-Keys gleichzeitig zu
+autorisieren — z.B. wenn mehrere Personen administrieren, oder schlicht als
+Vertretung, damit `admin-compact.sh`/`admin-shell.sh` auch dann noch jemand
+ausführen kann, wenn der übliche Admin im Urlaub oder krank ist. Serverseitig
+ist das einfach ein zweiter autorisierter Public Key mit demselben Forced
+Command, mit vollem Zugriff auf GENAU dieses eine Repo — kein gemeinsam
+genutzter Key, jeder Admin bleibt einzeln identifizierbar (und einzeln
+entziehbar). [docker-borg-backup-server](https://github.com/tabacha/docker-borg-backup-server)
+unterstützt das direkt: mehrere `*.pub`-Dateien unter `keys/admin/`
+derselben Identität sind alle gleichzeitig gültig, praktisch für genau
+diesen Fall wie auch für Key-Rotation (`add-admin-key.sh <name> <pubkey>`
+je Admin einmal aufrufen).
+
 Die zweite Hälfte ist in diesem Repo schon eingebaut: `admin-compact.sh` und
 `admin-shell.sh` nehmen absichtlich keinen eigenen Key aus `secrets/`, sondern
 verlangen ein per Agent-Forwarding mitgebrachtes `SSH_AUTH_SOCK` — der
@@ -330,16 +354,25 @@ oder eine kompromittierte Workstation reicht dann allein nicht mehr, um den
 Admin-Key zu benutzen. Was noch fehlt, ist die serverseitige Einschränkung
 des Backup-Keys auf Append-Only:
 
-- **Generischer SSH-Server:** Forced Command in `authorized_keys` auf dem
-  Repo-Server, vor dem Public Key des Backup-Keys. Das aufgerufene Binary
-  muss zu `BORG_REMOTE_PATH` aus `targets/<name>.env` passen (dort meist
-  einfach `borg`, bei Hetzner z.B. `borg-1.4` — `setup-secrets.sh <name>`
-  gibt die fertige Zeile passend zu diesem Zielserver mit aus):
+- **Fertig, statt selbst einzurichten:**
+  [docker-borg-backup-server](https://github.com/tabacha/docker-borg-backup-server)
+  (siehe Einleitung oben) setzt genau das hier beschriebene Modell
+  automatisiert um — eigener isolierter Unix-Account und Forced Command pro
+  Client/Admin, Append-Only für Backup-Keys, mehrere Admin-Keys pro
+  Zielserver inklusive (siehe Absatz oben). Für den eigenen generischen
+  SSH-Server oder Hetzner (unten) bleibt das Folgende Handarbeit.
+- **Generischer SSH-Server (manuell):** Forced Command in `authorized_keys`
+  auf dem Repo-Server, vor dem Public Key des Backup-Keys. Das aufgerufene
+  Binary muss zu `BORG_REMOTE_PATH` aus `targets/<name>.env` passen (dort
+  meist einfach `borg`, bei Hetzner z.B. `borg-1.4` — `setup-secrets.sh
+  <name>` gibt die fertige Zeile passend zu diesem Zielserver mit aus):
   ```
   command="borg serve --append-only --restrict-to-repository /pfad/zum/repo",restrict ssh-ed25519 AAAA... borg-backup
   ```
   `restrict` deaktiviert nebenbei Port-Forwarding/PTY/Agent-Forwarding für
-  genau diesen Key.
+  genau diesen Key. Für mehrere Admin-Keys (siehe oben) denselben Aufbau
+  mehrfach wiederholen — je Public Key ein eigener Forced-Command-Eintrag,
+  jeweils ohne `--append-only`.
 - **Hetzner Storage Box:** Append-Only wird
   [offiziell unterstützt](https://docs.hetzner.com/storage/storage-box/access/access-ssh-rsync-borg/) —
   dafür ein eigenes Sub-Konto nur für den Backup-Key anlegen und dort
