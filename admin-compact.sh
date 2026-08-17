@@ -78,7 +78,7 @@ echo "Started: $(date -Is) (target: ${TARGET})" | tee "${RUN_LOG}"
 START=$SECONDS
 
 set +e
-OUTPUT=$(
+LIST_AND_PRUNE_OUTPUT=$(
   (
     set -eo pipefail
 
@@ -92,21 +92,54 @@ OUTPUT=$(
         --stats \
         --glob-archives="${ARCHIVE_PREFIX}-*" \
         "${PRUNE_RETENTION_ARGS[@]}"
-
-    echo
-    echo "=== COMPACT ==="
-    docker compose run --rm borg-admin compact
-
-    echo
-    echo "=== Archives AFTER maintenance ==="
-    docker compose run --rm borg-admin list
   ) 2>&1
 )
 EXIT=$?
 set -e
 
-if [ -n "$OUTPUT" ]; then
-    echo "$OUTPUT" | tee -a "${RUN_LOG}"
+if [ -n "${LIST_AND_PRUNE_OUTPUT}" ]; then
+    echo "${LIST_AND_PRUNE_OUTPUT}" | tee -a "${RUN_LOG}"
+fi
+
+# compact ist der Punkt ohne Wiederkehr: solange nur "prune" lief, sind die
+# betroffenen Daten dank Borgs Append-Only-Modell nur als gelöscht markiert,
+# nicht physisch weg (siehe README -> "Sicherheit: zwei Schlüssel gegen
+# Ransomware") - das gilt auch für alles, was VOR diesem Lauf schon markiert
+# wurde, z.B. durch einen kompromittierten Backup-Key. Erst compact gibt den
+# Platz wirklich frei und macht das unwiderruflich (borgbackup/borg#3579).
+# Deshalb hier - mit dem prune-Output oben sichtbar vor Augen - noch einmal
+# explizit nachfragen, bevor das passiert.
+ABORTED_BY_USER=0
+if [ "${EXIT}" -eq 0 ]; then
+    echo
+    if ! read -r -p "compact macht ALLE bisher für Zielserver '${TARGET}' als gelöscht markierten Daten unwiderruflich weg (auch was VOR diesem Lauf markiert wurde). Wirklich fortfahren? Zum Bestätigen 'ja' eingeben: " CONFIRM; then
+        CONFIRM=""
+    fi
+    if [ "${CONFIRM,,}" != "ja" ]; then
+        echo "Abgebrochen: compact wurde NICHT ausgeführt (Bestätigung fehlt/verweigert)." | tee -a "${RUN_LOG}"
+        ABORTED_BY_USER=1
+        EXIT=1
+    else
+        set +e
+        COMPACT_OUTPUT=$(
+          (
+            set -eo pipefail
+
+            echo "=== COMPACT ==="
+            docker compose run --rm borg-admin compact
+
+            echo
+            echo "=== Archives AFTER maintenance ==="
+            docker compose run --rm borg-admin list
+          ) 2>&1
+        )
+        EXIT=$?
+        set -e
+
+        if [ -n "${COMPACT_OUTPUT}" ]; then
+            echo "${COMPACT_OUTPUT}" | tee -a "${RUN_LOG}"
+        fi
+    fi
 fi
 
 DURATION=$(( SECONDS - START ))
@@ -119,9 +152,12 @@ DURATION=$(( SECONDS - START ))
 if [ "${EXIT}" == "0" ]; then
     STATUS=up
     MSG="OK (${TARGET})"
+elif [ "${ABORTED_BY_USER}" -eq 1 ]; then
+    STATUS=down
+    MSG="admin-compact abgebrochen (${TARGET}): compact durch Nutzer nicht bestätigt"
 else
     STATUS=down
-    MSG="admin-compact fehlgeschlagen (${TARGET}, exit ${EXIT}): $(echo "$OUTPUT" | tail -n 5 | tr '\n' ' ')"
+    MSG="admin-compact fehlgeschlagen (${TARGET}, exit ${EXIT}): $(tail -n 5 "${RUN_LOG}" | tr '\n' ' ')"
 fi
 
 if [ -n "${PUSH_URL}" ]; then

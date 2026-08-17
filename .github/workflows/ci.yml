@@ -32,6 +32,9 @@ jobs:
       - name: BORG_CREATE_EXTRA_ARGS/PRUNE_RETENTION - kein Host-Shell-Globbing
         run: .github/scripts/test-extra-args-glob-safety.sh
 
+      - name: admin-compact.sh - Nachfrage vor compact
+        run: .github/scripts/test-admin-compact-confirmation.sh
+
       - name: compose.yml - mit targets/*.env muss es funktionieren
         run: |
           cp targets/example.env.example targets/example.env
